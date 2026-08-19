@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mattn/go-isatty"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/backup"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/cli"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/components/opencodeplugin"
@@ -42,6 +43,16 @@ var (
 	runTUI                    = func(m tea.Model, opts ...tea.ProgramOption) (tea.Model, error) {
 		p := tea.NewProgram(m, opts...)
 		return p.Run()
+	}
+	isTerminalStream = func(f *os.File) bool {
+		if f == nil {
+			return false
+		}
+		fd := f.Fd()
+		return isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)
+	}
+	isInteractiveTerminalFn = func() bool {
+		return isTerminalStream(os.Stdin) && isTerminalStream(os.Stdout)
 	}
 	// deferredSyncFn is the function called when PendingSync=true is found on
 	// launch. Swappable for tests; production value calls cli.RunSync directly.
@@ -148,6 +159,13 @@ func RunArgs(args []string, stdout io.Writer) error {
 			return err
 		}
 		parsedUpgrade = &parsed
+	}
+
+	// Issue #95: The no-argument route launches the interactive TUI.
+	// Verify that both stdin and stdout are interactive terminals before
+	// performing OS validation, system detection, probes, or launching Bubbletea.
+	if len(args) == 0 && !isInteractiveTerminalFn() {
+		return errors.New("gentle-ai interactive TUI requires an interactive terminal (TTY)\nFor non-interactive usage, run 'gentle-ai --help' or 'gentle-ai --version'")
 	}
 
 	if err := ensureCurrentOSSupported(); err != nil {
