@@ -2684,6 +2684,30 @@ func TestRunArgs_NoArgs_RequiresInteractiveTerminal(t *testing.T) {
 func TestRunArgs_ExplicitCommands_DoNotRequireInteractiveTerminal(t *testing.T) {
 	setupMockInteractiveTerminal(t, false)
 
+	origCheckAll := updateCheckAll
+	origDetect := detectSystem
+	origEnsure := ensureCurrentOSSupported
+	t.Cleanup(func() {
+		updateCheckAll = origCheckAll
+		detectSystem = origDetect
+		ensureCurrentOSSupported = origEnsure
+	})
+
+	ensureCurrentOSSupported = func() error { return nil }
+	detectSystem = func(context.Context) (system.DetectionResult, error) {
+		return system.DetectionResult{System: system.SystemInfo{Supported: true}}, nil
+	}
+	updateCheckAll = func(context.Context, string, system.PlatformProfile) []update.UpdateResult {
+		return []update.UpdateResult{
+			{
+				Tool:             update.ToolInfo{Name: "gentle-ai"},
+				InstalledVersion: "1.0.0",
+				LatestVersion:    "1.0.0",
+				Status:           update.UpToDate,
+			},
+		}
+	}
+
 	var buf bytes.Buffer
 	if err := RunArgs([]string{"--version"}, &buf); err != nil {
 		t.Fatalf("RunArgs(--version) error = %v, want success in non-interactive environment", err)
@@ -2698,5 +2722,10 @@ func TestRunArgs_ExplicitCommands_DoNotRequireInteractiveTerminal(t *testing.T) 
 	}
 	if !strings.Contains(buf.String(), "gentle-ai") {
 		t.Fatalf("RunArgs(--help) output = %q, want help output", buf.String())
+	}
+
+	buf.Reset()
+	if err := RunArgs([]string{"update"}, &buf); err != nil {
+		t.Fatalf("RunArgs(update) error = %v, want success in non-interactive environment", err)
 	}
 }
