@@ -340,26 +340,28 @@ func RenderUninstallConfirm(mode model.UninstallMode, selected []model.AgentID, 
 	b.WriteString("\n")
 
 	// Workspace-scoped assets warning
-	hasWorkspaceAssets := false
-	for _, comp := range components {
-		if comp == model.ComponentSDD || comp == model.ComponentSkills {
-			hasWorkspaceAssets = true
-			break
-		}
-	}
-	if (mode == model.UninstallModeFull || mode == model.UninstallModeFullRemove) || hasWorkspaceAssets {
+	hasEngramProjectAsset := engramScope == model.EngramUninstallScopeProject && engramProjectScopeAvailable && hasSelectedComponent(components, model.ComponentEngram)
+	hasSDD := (mode == model.UninstallModeFull || mode == model.UninstallModeFullRemove) || hasSelectedComponent(components, model.ComponentSDD)
+	hasSkills := (mode == model.UninstallModeFull || mode == model.UninstallModeFullRemove) || hasSelectedComponent(components, model.ComponentSkills)
+
+	if hasSDD || hasSkills || hasEngramProjectAsset {
 		b.WriteString(styles.WarningStyle.Render("⚠ Workspace Assets Warning:"))
 		b.WriteString("\n")
-		b.WriteString(styles.SubtextStyle.Render("  Removing SDD or Skills will delete workspace-scoped files like:"))
+		b.WriteString(styles.SubtextStyle.Render("  Removing managed components will delete workspace-scoped files like:"))
 		b.WriteString("\n")
-		b.WriteString(styles.SubtextStyle.Render("  • .windsurf/workflows/ (SDD workflows)"))
-		b.WriteString("\n")
-		if engramScope == model.EngramUninstallScopeProject && engramProjectScopeAvailable {
+		if hasSDD {
+			b.WriteString(styles.SubtextStyle.Render("  • .windsurf/workflows/ (SDD workflows)"))
+			b.WriteString("\n")
+		}
+		if hasEngramProjectAsset {
 			b.WriteString(styles.SubtextStyle.Render("  • .engram/ (persistent memory context)"))
 			b.WriteString("\n")
 		}
-		b.WriteString(styles.SubtextStyle.Render("  • Skills directories"))
-		b.WriteString("\n\n")
+		if hasSkills {
+			b.WriteString(styles.SubtextStyle.Render("  • Skills directories"))
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
 		b.WriteString(styles.ErrorStyle.Render("  If you commit these deletions, ALL collaborators will lose this context!"))
 		b.WriteString("\n\n")
 	}
