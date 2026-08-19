@@ -89,3 +89,27 @@ func TestRenderUninstallResultIncludesEngramScopeSummary(t *testing.T) {
 		t.Fatalf("RenderUninstallResult() should include Engram project scope summary; got:\n%s", out)
 	}
 }
+
+func TestRenderUninstallConfirmWorkspaceWarningOmitsEngramWhenScopeIsNone(t *testing.T) {
+	out := RenderUninstallConfirm(
+		model.UninstallModePartial,
+		[]model.AgentID{model.AgentOpenCode},
+		[]model.ComponentID{model.ComponentSDD, model.ComponentEngram},
+		[]string{"cheap"},
+		model.EngramUninstallScopeNone,
+		true,
+		0,
+		false,
+		0,
+	)
+
+	if !strings.Contains(out, "⚠ Workspace Assets Warning:") {
+		t.Fatalf("RenderUninstallConfirm() should include Workspace Assets Warning; got:\n%s", out)
+	}
+	if !strings.Contains(out, ".windsurf/workflows/") {
+		t.Fatalf("RenderUninstallConfirm() should mention .windsurf/workflows/ for SDD; got:\n%s", out)
+	}
+	if strings.Contains(out, "• .engram/") {
+		t.Fatalf("RenderUninstallConfirm() should NOT mention .engram/ deletion when scope is none; got:\n%s", out)
+	}
+}
