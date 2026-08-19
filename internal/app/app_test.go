@@ -2728,4 +2728,7 @@ func TestRunArgs_ExplicitCommands_DoNotRequireInteractiveTerminal(t *testing.T) 
 	if err := RunArgs([]string{"update"}, &buf); err != nil {
 		t.Fatalf("RunArgs(update) error = %v, want success in non-interactive environment", err)
 	}
+	if !strings.Contains(buf.String(), "gentle-ai") {
+		t.Fatalf("RunArgs(update) output = %q, want update output", buf.String())
+	}
 }
