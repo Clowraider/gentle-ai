@@ -2680,7 +2680,7 @@ func TestRunArgs_NoArgs_RequiresInteractiveTerminal(t *testing.T) {
 }
 
 // TestRunArgs_ExplicitCommands_DoNotRequireInteractiveTerminal verifies that
-// non-interactive commands (--version, --help) succeed without requiring a TTY.
+// non-interactive commands (--version, --help, update) succeed without requiring a TTY.
 func TestRunArgs_ExplicitCommands_DoNotRequireInteractiveTerminal(t *testing.T) {
 	setupMockInteractiveTerminal(t, false)
 

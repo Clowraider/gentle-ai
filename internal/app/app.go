@@ -44,6 +44,8 @@ var (
 		p := tea.NewProgram(m, opts...)
 		return p.Run()
 	}
+	// isTerminalStream checks if a file descriptor is an interactive terminal
+	// (native or Cygwin/MSYS2 terminal); injectable for tests.
 	isTerminalStream = func(f *os.File) bool {
 		if f == nil {
 			return false
@@ -51,6 +53,8 @@ var (
 		fd := f.Fd()
 		return isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)
 	}
+	// isInteractiveTerminalFn verifies both stdin and stdout are interactive terminals;
+	// injectable for tests.
 	isInteractiveTerminalFn = func() bool {
 		return isTerminalStream(os.Stdin) && isTerminalStream(os.Stdout)
 	}
@@ -165,7 +169,7 @@ func RunArgs(args []string, stdout io.Writer) error {
 	// Verify that both stdin and stdout are interactive terminals before
 	// performing OS validation, system detection, probes, or launching Bubbletea.
 	if len(args) == 0 && !isInteractiveTerminalFn() {
-		return errors.New("gentle-ai interactive TUI requires an interactive terminal (TTY)\nFor non-interactive usage, run 'gentle-ai --help' or 'gentle-ai --version'")
+		return errors.New("gentle-ai interactive TUI requires an interactive terminal (TTY)\nFor non-interactive usage, run 'gentle-ai --help', 'gentle-ai --version', or 'gentle-ai update'")
 	}
 
 	if err := ensureCurrentOSSupported(); err != nil {
