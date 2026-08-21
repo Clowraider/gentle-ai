@@ -200,7 +200,7 @@ func (store Store) append(expectedRevision string, record Record) (string, error
 		}
 		defer maintenance.Release()
 	}
-	if err := os.MkdirAll(filepath.Join(store.Dir, "events"), 0o755); err != nil {
+	if err := mkdirAllSync(filepath.Join(store.Dir, "events"), 0o755); err != nil {
 		return "", err
 	}
 	lockPath := filepath.Join(store.Dir, "LOCK")
@@ -310,6 +310,9 @@ func (store Store) append(expectedRevision string, record Record) (string, error
 		} else {
 			return "", err
 		}
+	}
+	if err := SyncReviewDirectory(filepath.Join(store.Dir, "events")); err != nil {
+		return "", &directorySyncError{path: filepath.Join(store.Dir, "events"), cause: err}
 	}
 	if err := writeAtomic(filepath.Join(store.Dir, "HEAD"), []byte(revision+"\n"), 0o644); err != nil {
 		return "", err
@@ -919,7 +922,7 @@ func readRevision(path string) (string, error) {
 }
 
 func writeAtomic(path string, payload []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := mkdirAllSync(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	temp, err := os.CreateTemp(filepath.Dir(path), ".atomic-*")
@@ -954,7 +957,7 @@ func writeAtomic(path string, payload []byte, mode os.FileMode) error {
 
 func publishImmutable(path string, payload []byte, mode os.FileMode) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := mkdirAllSync(dir, 0o755); err != nil {
 		return err
 	}
 	temp, err := os.CreateTemp(dir, ".publish-*")
@@ -1003,6 +1006,44 @@ func publishImmutable(path string, payload []byte, mode os.FileMode) error {
 	}
 	if err := SyncReviewDirectory(dir); err != nil {
 		return &directorySyncError{path: path, cause: err}
+	}
+	return nil
+}
+
+// mkdirAllSync creates missing directory components from root down to dir and
+// synchronizes each newly created entry's parent directory bottom-up before
+// returning, guaranteeing durability of the directory entries on Unix platforms.
+func mkdirAllSync(dir string, mode os.FileMode) error {
+	dir = filepath.Clean(dir)
+	if dir == "." || dir == "" || dir == string(filepath.Separator) || dir == filepath.VolumeName(dir)+string(filepath.Separator) {
+		return nil
+	}
+	var stack []string
+	for p := dir; ; p = filepath.Dir(p) {
+		stack = append(stack, p)
+		parent := filepath.Dir(p)
+		if parent == p || p == filepath.VolumeName(p)+string(filepath.Separator) || p == string(filepath.Separator) || p == "." {
+			break
+		}
+	}
+	for i := len(stack) - 1; i >= 0; i-- {
+		p := stack[i]
+		err := os.Mkdir(p, mode)
+		if err == nil {
+			if syncErr := SyncReviewDirectory(filepath.Dir(p)); syncErr != nil {
+				return &directorySyncError{path: p, cause: syncErr}
+			}
+		} else if os.IsExist(err) {
+			info, statErr := os.Lstat(p)
+			if statErr != nil {
+				return statErr
+			}
+			if !info.IsDir() {
+				return fmt.Errorf("%w: %q is not a directory", syscall.ENOTDIR, p)
+			}
+		} else {
+			return err
+		}
 	}
 	return nil
 }
