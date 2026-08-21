@@ -157,8 +157,8 @@ func TestGeneratedOpenCodeReviewControllersUseNegotiatedStatusRouting(t *testing
 
 func TestBoundedReviewContractRendersForEverySupportedAgent(t *testing.T) {
 	agents := catalog.AllAgents()
-	if len(agents) != 16 {
-		t.Fatalf("catalog.AllAgents() = %d, want 16", len(agents))
+	if len(agents) != 17 {
+		t.Fatalf("catalog.AllAgents() = %d, want 17", len(agents))
 	}
 	for _, agent := range agents {
 		t.Run(string(agent.ID), func(t *testing.T) {

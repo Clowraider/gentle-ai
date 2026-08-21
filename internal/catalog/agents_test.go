@@ -95,3 +95,35 @@ func TestIsSupportedAgentAcceptsHermes(t *testing.T) {
 		t.Fatalf("IsSupportedAgent(%q) = false, want true", model.AgentHermes)
 	}
 }
+
+func TestAllAgentsIncludesGitHubCopilotCLI(t *testing.T) {
+	agents := AllAgents()
+
+	for _, agent := range agents {
+		if agent.ID != model.AgentGitHubCopilotCLI {
+			continue
+		}
+
+		if agent.Name != "GitHub Copilot CLI" {
+			t.Fatalf("GitHub Copilot CLI Name = %q, want GitHub Copilot CLI", agent.Name)
+		}
+
+		if agent.Tier != model.TierFull {
+			t.Fatalf("GitHub Copilot CLI Tier = %q, want %q", agent.Tier, model.TierFull)
+		}
+
+		if agent.ConfigPath != "~/.copilot" {
+			t.Fatalf("GitHub Copilot CLI ConfigPath = %q, want ~/.copilot", agent.ConfigPath)
+		}
+
+		return
+	}
+
+	t.Fatalf("AllAgents() missing %s", model.AgentGitHubCopilotCLI)
+}
+
+func TestIsSupportedAgentAcceptsGitHubCopilotCLI(t *testing.T) {
+	if !IsSupportedAgent(model.AgentGitHubCopilotCLI) {
+		t.Fatalf("IsSupportedAgent(%q) = false, want true", model.AgentGitHubCopilotCLI)
+	}
+}

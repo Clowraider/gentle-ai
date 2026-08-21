@@ -54,8 +54,9 @@ var agentToolBinaries = map[string]string{
 	"kiro-ide":       "kiro",
 	"kimi":           "kimi",
 	"qwen-code":      "qwen",
-	"vscode-copilot": "code",
-	"openclaw":       "openclaw",
+	"vscode-copilot":     "code",
+	"github-copilot-cli": "copilot",
+	"openclaw":           "openclaw",
 	"hermes":         "hermes",
 }
 
