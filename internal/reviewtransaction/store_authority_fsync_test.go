@@ -11,7 +11,9 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func newFsyncTestRecord(t *testing.T) Record {
@@ -337,5 +339,65 @@ func TestMkdirAllSyncRejectsSymlinkedAncestor(t *testing.T) {
 	target := filepath.Join(symlinkedParent, "nested", "events")
 	if err := mkdirAllSync(target, 0o755); err == nil {
 		t.Fatal("mkdirAllSync() succeeded with symlinked ancestor component, want error")
+	}
+}
+
+func TestMkdirAllSyncConcurrentWritersCoordinateParentSync(t *testing.T) {
+	tempDir := t.TempDir()
+	target := filepath.Join(tempDir, "a", "b")
+
+	var writer1SyncDone atomic.Bool
+	var writer2ObservedBeforeSync atomic.Bool
+
+	mkdirHookCalled := make(chan struct{})
+	unblockWriter1 := make(chan struct{})
+
+	originalHook := mkdirAllSyncAfterMkdir
+	mkdirAllSyncAfterMkdir = func(path string) {
+		if path == target {
+			close(mkdirHookCalled)
+			<-unblockWriter1
+		}
+	}
+	t.Cleanup(func() { mkdirAllSyncAfterMkdir = originalHook })
+
+	originalSync := syncReviewDirectory
+	syncReviewDirectory = func(path string) error {
+		if strings.HasSuffix(filepath.Clean(path), "a") {
+			writer1SyncDone.Store(true)
+		}
+		return nil
+	}
+	t.Cleanup(func() { syncReviewDirectory = originalSync })
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		if err := mkdirAllSync(target, 0o755); err != nil {
+			t.Errorf("writer 1 mkdirAllSync error = %v", err)
+		}
+	}()
+
+	<-mkdirHookCalled
+
+	go func() {
+		defer wg.Done()
+		if err := mkdirAllSync(target, 0o755); err != nil {
+			t.Errorf("writer 2 mkdirAllSync error = %v", err)
+		}
+		if !writer1SyncDone.Load() {
+			writer2ObservedBeforeSync.Store(true)
+		}
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	close(unblockWriter1)
+
+	wg.Wait()
+
+	if writer2ObservedBeforeSync.Load() {
+		t.Fatal("writer 2 returned from mkdirAllSync before writer 1 finished parent directory sync")
 	}
 }

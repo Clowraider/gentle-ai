@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 )
 
@@ -35,6 +36,8 @@ var syncReviewDirectory = func(path string) error {
 	}
 	return directory.Close()
 }
+var mkdirAllSyncMu sync.Mutex
+var mkdirAllSyncAfterMkdir = func(path string) {}
 
 type directorySyncError struct {
 	path  string
@@ -1018,6 +1021,8 @@ func mkdirAllSync(dir string, mode os.FileMode) error {
 	if dir == "." || dir == "" || dir == string(filepath.Separator) || dir == filepath.VolumeName(dir)+string(filepath.Separator) {
 		return nil
 	}
+	mkdirAllSyncMu.Lock()
+	defer mkdirAllSyncMu.Unlock()
 	var stack []string
 	for p := dir; ; p = filepath.Dir(p) {
 		stack = append(stack, p)
@@ -1039,6 +1044,7 @@ func mkdirAllSync(dir string, mode os.FileMode) error {
 			return err
 		}
 		if mkdirErr := os.Mkdir(p, mode); mkdirErr == nil {
+			mkdirAllSyncAfterMkdir(p)
 			if syncErr := SyncReviewDirectory(filepath.Dir(p)); syncErr != nil {
 				return &directorySyncError{path: p, cause: syncErr}
 			}
