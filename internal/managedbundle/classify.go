@@ -124,7 +124,7 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 			}
 		}
 
-		if fi.Mode()&os.ModeSymlink != 0 || fi.IsDir() {
+		if !fi.Mode().IsRegular() {
 			return ClassificationResult{
 				BundleIdentity:     BundleIdentityUserModified,
 				ExtentIntegrity:    ExtentIntegrityTypeChanged,
@@ -191,6 +191,59 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 
 	// Check if manifest producer matches the running binary catalog
 	if manifest.Producer.CatalogDigest == currentCatalogDigest {
+		// Validate that manifest.Resources exactly matches current catalog descriptors
+		if len(manifest.Resources) != len(catalog.Resources) {
+			return ClassificationResult{
+				BundleIdentity:     BundleIdentityMixed,
+				ExtentIntegrity:    ExtentIntegrityUserModified,
+				RecoveryState:      RecoveryStateNone,
+				SyncEligible:       false,
+				SyncEligibleReason: SyncReasonMixedResourceTransactions,
+				Detail:             "manifest resources count does not match current catalog",
+			}
+		}
+
+		manifestMap := make(map[string]ResourceEntry, len(manifest.Resources))
+		for _, r := range manifest.Resources {
+			manifestMap[r.ResourceID] = r
+		}
+
+		for _, desc := range catalog.Resources {
+			res, ok := manifestMap[desc.ResourceID]
+			if !ok {
+				return ClassificationResult{
+					BundleIdentity:     BundleIdentityMixed,
+					ExtentIntegrity:    ExtentIntegrityUserModified,
+					RecoveryState:      RecoveryStateNone,
+					SyncEligible:       false,
+					SyncEligibleReason: SyncReasonMixedResourceTransactions,
+					Detail:             fmt.Sprintf("manifest missing resource descriptor %s", desc.ResourceID),
+				}
+			}
+			desired, err := desc.RenderDesired()
+			if err != nil {
+				return ClassificationResult{
+					BundleIdentity:     BundleIdentityUnknown,
+					ExtentIntegrity:    ExtentIntegrityMatch,
+					RecoveryState:      RecoveryStateNone,
+					SyncEligible:       false,
+					SyncEligibleReason: SyncReasonCatalogDigestError,
+					Detail:             fmt.Sprintf("failed to render desired extent: %v", err),
+				}
+			}
+			expectedTarget := TargetIdentityToken(desc.CanonicalPath)
+			if res.TargetIdentity != expectedTarget || res.CanonicalPath != desc.CanonicalPath || res.Ownership.Kind != desc.Ownership.Kind || res.DesiredSHA256 != desired.SHA256 || (desired.Mode != 0 && res.Mode != desired.Mode) {
+				return ClassificationResult{
+					BundleIdentity:     BundleIdentityUserModified,
+					ExtentIntegrity:    ExtentIntegrityUserModified,
+					RecoveryState:      RecoveryStateNone,
+					SyncEligible:       false,
+					SyncEligibleReason: SyncReasonContentMismatch,
+					Detail:             fmt.Sprintf("manifest resource %s descriptor mismatch with running catalog", desc.ResourceID),
+				}
+			}
+		}
+
 		return ClassificationResult{
 			BundleIdentity:     BundleIdentityAligned,
 			ExtentIntegrity:    ExtentIntegrityMatch,
@@ -240,6 +293,10 @@ func checkActiveTransactions(homeDir string, manifest ManagedBundleManifest) (Re
 			return RecoveryStateBlockedConflict, fmt.Sprintf("malformed transaction journal %s: %v", entry.Name(), err)
 		}
 
+		if journal.Schema != JournalSchemaV1 {
+			return RecoveryStateBlockedConflict, fmt.Sprintf("unsupported transaction journal schema %q in %s", journal.Schema, entry.Name())
+		}
+
 		if journal.LastPhase == PhaseCompleted || journal.LastPhase == PhaseRolledBack {
 			continue
 		}
@@ -266,7 +323,7 @@ func checkActiveTransactions(homeDir string, manifest ManagedBundleManifest) (Re
 
 		for _, res := range journal.Resources {
 			targetPath := filepath.Join(homeDir, filepath.FromSlash(res.CanonicalPath))
-			content, err := os.ReadFile(targetPath)
+			fi, err := os.Lstat(targetPath)
 			if err != nil {
 				if os.IsNotExist(err) && res.BeforeSHA256 == "" {
 					// file didn't exist before
@@ -276,13 +333,29 @@ func checkActiveTransactions(homeDir string, manifest ManagedBundleManifest) (Re
 				hasForeign = true
 				break
 			}
+			if !fi.Mode().IsRegular() {
+				hasForeign = true
+				break
+			}
+			fileMode := uint32(fi.Mode().Perm())
+
+			content, err := os.ReadFile(targetPath)
+			if err != nil {
+				hasForeign = true
+				break
+			}
 			sum := sha256.Sum256(content)
 			fileSHA := "sha256:" + hex.EncodeToString(sum[:])
 
-			if fileSHA == res.DesiredSHA256 {
+			matchesDesired := (fileSHA == res.DesiredSHA256) && (res.DesiredMode == 0 || fileMode == res.DesiredMode)
+			matchesBefore := (fileSHA == res.BeforeSHA256) && (res.BeforeMode == 0 || fileMode == res.BeforeMode)
+
+			if matchesDesired && !matchesBefore {
 				allBefore = false
-			} else if fileSHA == res.BeforeSHA256 {
+			} else if matchesBefore && !matchesDesired {
 				allDesired = false
+			} else if matchesDesired && matchesBefore {
+				// identical before and desired
 			} else {
 				hasForeign = true
 				break

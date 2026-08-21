@@ -789,3 +789,229 @@ func TestJournal_MalformedJournal_BlockedConflict(t *testing.T) {
 		t.Errorf("got recovery state %s, want %s", res.RecoveryState, RecoveryStateBlockedConflict)
 	}
 }
+
+// TestJournal_UnsupportedJournalSchema_BlockedConflict verifies unsupported journal schema is rejected as conflict.
+func TestJournal_UnsupportedJournalSchema_BlockedConflict(t *testing.T) {
+	home := t.TempDir()
+	catalog := makeTestCatalog("2.2.0", []byte("content"), 0644)
+	manifest := ManagedBundleManifest{
+		Schema:        ManifestSchemaV1,
+		Generation:    1,
+		TransactionID: "tx-1",
+		Producer: ProducerInfo{
+			Version:       "2.2.0",
+			CatalogDigest: "sha256:digest",
+		},
+		Resources: []ResourceEntry{
+			{
+				ResourceID:     DefaultArchiveSkillResourceID,
+				TargetIdentity: TargetIdentityToken(DefaultArchiveSkillRelPath),
+				CanonicalPath:  DefaultArchiveSkillRelPath,
+				Ownership:      OwnershipDescriptor{Kind: OwnershipFullFile},
+				DesiredSHA256:  "sha256:1",
+				ObservedSHA256: "sha256:1",
+				Mode:           0644,
+				TransactionID:  "tx-1",
+			},
+		},
+	}
+	if err := WriteManifest(home, manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	journal := MigrationJournal{
+		Schema:             "gentle-ai.managed-journal/v999",
+		TransactionID:      "tx-future",
+		ExpectedGeneration: 1,
+		ProposedGeneration: 2,
+		LastPhase:          PhaseCompleted, // Looks completed, but schema is unsupported
+		Resources: []ResourceJournalEntry{
+			{
+				ResourceID:    DefaultArchiveSkillResourceID,
+				CanonicalPath: DefaultArchiveSkillRelPath,
+			},
+		},
+	}
+	dir := filepath.Join(home, ManagedDirName, ManagedSubDir, JournalDirName, "tx-future")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := json.Marshal(journal)
+	if err := os.WriteFile(filepath.Join(dir, JournalFileName), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	res := Classify(context.Background(), home, catalog)
+	if res.RecoveryState != RecoveryStateBlockedConflict {
+		t.Errorf("got recovery state %s, want %s", res.RecoveryState, RecoveryStateBlockedConflict)
+	}
+}
+
+// TestJournal_DesiredModeMismatch_BlockedConflict verifies mode mismatch prevents false resumable_desired.
+func TestJournal_DesiredModeMismatch_BlockedConflict(t *testing.T) {
+	home := t.TempDir()
+	content := []byte("# content\n")
+	catalog := makeTestCatalog("2.2.0", content, 0644)
+
+	filePath := filepath.Join(home, filepath.FromSlash(DefaultArchiveSkillRelPath))
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filePath, content, 0600); err != nil { // mode is 0600, desired is 0644
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filePath, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	sum := sha256.Sum256(content)
+	sha := "sha256:" + hex.EncodeToString(sum[:])
+
+	manifest := ManagedBundleManifest{
+		Schema:        ManifestSchemaV1,
+		Generation:    1,
+		TransactionID: "tx-1",
+		Producer: ProducerInfo{
+			Version:       "2.1.10",
+			CatalogDigest: "sha256:old",
+		},
+		Resources: []ResourceEntry{
+			{
+				ResourceID:     DefaultArchiveSkillResourceID,
+				TargetIdentity: TargetIdentityToken(DefaultArchiveSkillRelPath),
+				CanonicalPath:  DefaultArchiveSkillRelPath,
+				Ownership:      OwnershipDescriptor{Kind: OwnershipFullFile},
+				DesiredSHA256:  sha,
+				ObservedSHA256: sha,
+				Mode:           0644,
+				TransactionID:  "tx-1",
+			},
+		},
+	}
+	if err := WriteManifest(home, manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	journal := MigrationJournal{
+		Schema:             JournalSchemaV1,
+		TransactionID:      "tx-2",
+		ExpectedGeneration: 1,
+		ProposedGeneration: 2,
+		LastPhase:          PhaseApplying,
+		Resources: []ResourceJournalEntry{
+			{
+				ResourceID:    DefaultArchiveSkillResourceID,
+				CanonicalPath: DefaultArchiveSkillRelPath,
+				Ownership:     OwnershipDescriptor{Kind: OwnershipFullFile},
+				BeforeSHA256:  "sha256:before",
+				BeforeMode:    0644,
+				DesiredSHA256: sha,
+				DesiredMode:   0644, // Desired mode is 0644, file on disk is 0600
+			},
+		},
+	}
+	if err := WriteJournal(home, journal); err != nil {
+		t.Fatal(err)
+	}
+
+	res := Classify(context.Background(), home, catalog)
+	if res.RecoveryState != RecoveryStateBlockedConflict {
+		t.Errorf("got recovery state %s, want %s", res.RecoveryState, RecoveryStateBlockedConflict)
+	}
+}
+
+// TestClassify_NonRegularTarget_TypeChanged verifies symlink/directory target is classified as type_changed.
+func TestClassify_NonRegularTarget_TypeChanged(t *testing.T) {
+	home := t.TempDir()
+	content := []byte("# content\n")
+	catalog := makeTestCatalog("2.2.0", content, 0644)
+	digest, _ := catalog.ComputeCatalogDigest()
+
+	filePath := filepath.Join(home, filepath.FromSlash(DefaultArchiveSkillRelPath))
+	if err := os.MkdirAll(filePath, 0755); err != nil { // Directory instead of regular file!
+		t.Fatal(err)
+	}
+
+	manifest := ManagedBundleManifest{
+		Schema:        ManifestSchemaV1,
+		Generation:    1,
+		TransactionID: "tx-1",
+		Producer: ProducerInfo{
+			Version:       "2.2.0",
+			CatalogDigest: digest,
+		},
+		Resources: []ResourceEntry{
+			{
+				ResourceID:     DefaultArchiveSkillResourceID,
+				TargetIdentity: TargetIdentityToken(DefaultArchiveSkillRelPath),
+				CanonicalPath:  DefaultArchiveSkillRelPath,
+				Ownership:      OwnershipDescriptor{Kind: OwnershipFullFile},
+				DesiredSHA256:  "sha256:1",
+				ObservedSHA256: "sha256:1",
+				Mode:           0644,
+				TransactionID:  "tx-1",
+			},
+		},
+	}
+	if err := WriteManifest(home, manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	res := Classify(context.Background(), home, catalog)
+	if res.ExtentIntegrity != ExtentIntegrityTypeChanged {
+		t.Errorf("got extent integrity %s, want %s", res.ExtentIntegrity, ExtentIntegrityTypeChanged)
+	}
+}
+
+// TestClassify_ResourceDescriptorMismatch_NotAligned verifies that manifest with incorrect descriptor details is not reported as aligned.
+func TestClassify_ResourceDescriptorMismatch_NotAligned(t *testing.T) {
+	home := t.TempDir()
+	content := []byte("# content\n")
+	catalog := makeTestCatalog("2.2.0", content, 0644)
+	digest, _ := catalog.ComputeCatalogDigest()
+
+	filePath := filepath.Join(home, filepath.FromSlash(DefaultArchiveSkillRelPath))
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filePath, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filePath, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	sum := sha256.Sum256(content)
+	sha := "sha256:" + hex.EncodeToString(sum[:])
+
+	// Manifest records matching Producer.CatalogDigest but has a decoy resource path
+	manifest := ManagedBundleManifest{
+		Schema:        ManifestSchemaV1,
+		Generation:    1,
+		TransactionID: "tx-1",
+		Producer: ProducerInfo{
+			Version:       "2.2.0",
+			CatalogDigest: digest,
+		},
+		Resources: []ResourceEntry{
+			{
+				ResourceID:     DefaultArchiveSkillResourceID,
+				TargetIdentity: TargetIdentityToken("other/decoy/path.md"),
+				CanonicalPath:  DefaultArchiveSkillRelPath,
+				Ownership:      OwnershipDescriptor{Kind: OwnershipFullFile},
+				DesiredSHA256:  sha,
+				ObservedSHA256: sha,
+				Mode:           0644,
+				TransactionID:  "tx-1",
+			},
+		},
+	}
+	if err := WriteManifest(home, manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	res := Classify(context.Background(), home, catalog)
+	if res.BundleIdentity == BundleIdentityAligned {
+		t.Errorf("expected mismatch to prevent aligned bundle identity, got %s", res.BundleIdentity)
+	}
+}
