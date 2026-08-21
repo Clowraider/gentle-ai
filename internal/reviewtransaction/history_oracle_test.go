@@ -572,6 +572,80 @@ func TestOracleLinearizabilityRejectsNonSerializableHistory(t *testing.T) {
 	}
 }
 
+func TestOracleLinearizabilityRejectsInvertedTimeInterval(t *testing.T) {
+	checker := LinearizabilityChecker{}
+	history := []HistoryEvent{
+		{
+			InvocationID: "inv-inverted",
+			ResponseID:   "resp-inverted",
+			StartTime:    10,
+			EndTime:      5,
+			Actor:        "actor-1",
+			Operation:    HistoryOpStart,
+			LineageID:    "lin-time-fail",
+			ResultCode:   "created",
+		},
+	}
+
+	if _, err := checker.CheckLinearizability(history); err == nil {
+		t.Fatal("CheckLinearizability() succeeded on inverted time interval, want error")
+	}
+}
+
+func TestOracleLinearizabilitySupportsMultipleIndependentLineages(t *testing.T) {
+	checker := LinearizabilityChecker{}
+	history := []HistoryEvent{
+		{
+			InvocationID: "start-lin-A",
+			ResponseID:   "start-lin-A-resp",
+			StartTime:    1,
+			EndTime:      2,
+			Actor:        "actor-A",
+			Operation:    HistoryOpStart,
+			LineageID:    "lin-A",
+			ResultCode:   "created",
+		},
+		{
+			InvocationID: "start-lin-B",
+			ResponseID:   "start-lin-B-resp",
+			StartTime:    2,
+			EndTime:      3,
+			Actor:        "actor-B",
+			Operation:    HistoryOpStart,
+			LineageID:    "lin-B",
+			ResultCode:   "created",
+		},
+		{
+			InvocationID: "fin-lin-A",
+			ResponseID:   "fin-lin-A-resp",
+			StartTime:    3,
+			EndTime:      4,
+			Actor:        "actor-A",
+			Operation:    HistoryOpFinalize,
+			LineageID:    "lin-A",
+			ResultCode:   "approved",
+		},
+		{
+			InvocationID: "fin-lin-B",
+			ResponseID:   "fin-lin-B-resp",
+			StartTime:    4,
+			EndTime:      5,
+			Actor:        "actor-B",
+			Operation:    HistoryOpFinalize,
+			LineageID:    "lin-B",
+			ResultCode:   "approved",
+		},
+	}
+
+	linearized, err := checker.CheckLinearizability(history)
+	if err != nil {
+		t.Fatalf("CheckLinearizability() failed on multi-lineage history: %v", err)
+	}
+	if len(linearized) != 4 {
+		t.Fatalf("linearized count = %d, want 4", len(linearized))
+	}
+}
+
 func TestOracleLivenessRejectsBudgetExceeded(t *testing.T) {
 	checker := LinearizabilityChecker{}
 

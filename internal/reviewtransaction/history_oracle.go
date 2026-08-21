@@ -245,6 +245,12 @@ func (c LinearizabilityChecker) CheckLinearizability(events []HistoryEvent) ([]H
 		return nil, fmt.Errorf("history length %d exceeds maximum linearizability bound (%d)", len(events), MaxHistoryEventsBound)
 	}
 
+	for _, event := range events {
+		if event.EndTime < event.StartTime {
+			return nil, fmt.Errorf("event %q ends before it starts (start=%d, end=%d)", event.InvocationID, event.StartTime, event.EndTime)
+		}
+	}
+
 	// Precedence constraints: if event A finishes before event B starts (EndTime(A) < StartTime(B)),
 	// then A must precede B in any valid serialization.
 	n := len(events)
@@ -264,8 +270,8 @@ func (c LinearizabilityChecker) CheckLinearizability(events []HistoryEvent) ([]H
 	visited := make([]bool, n)
 	order := make([]HistoryEvent, 0, n)
 
-	var search func(state OracleModelState) ([]HistoryEvent, bool)
-	search = func(state OracleModelState) ([]HistoryEvent, bool) {
+	var search func(lineageStates map[string]OracleModelState) ([]HistoryEvent, bool)
+	search = func(lineageStates map[string]OracleModelState) ([]HistoryEvent, bool) {
 		if len(order) == n {
 			return order, true
 		}
@@ -287,7 +293,13 @@ func (c LinearizabilityChecker) CheckLinearizability(events []HistoryEvent) ([]H
 				continue
 			}
 
-			nextState, legal, _ := state.Step(events[i])
+			lineage := events[i].LineageID
+			currentState, ok := lineageStates[lineage]
+			if !ok {
+				currentState = InitialOracleModelState()
+			}
+
+			nextState, legal, _ := currentState.Step(events[i])
 			if !legal {
 				continue
 			}
@@ -295,7 +307,13 @@ func (c LinearizabilityChecker) CheckLinearizability(events []HistoryEvent) ([]H
 			visited[i] = true
 			order = append(order, events[i])
 
-			if res, ok := search(nextState); ok {
+			nextLineageStates := make(map[string]OracleModelState, len(lineageStates)+1)
+			for k, v := range lineageStates {
+				nextLineageStates[k] = v
+			}
+			nextLineageStates[lineage] = nextState
+
+			if res, ok := search(nextLineageStates); ok {
 				return res, true
 			}
 
@@ -306,8 +324,7 @@ func (c LinearizabilityChecker) CheckLinearizability(events []HistoryEvent) ([]H
 		return nil, false
 	}
 
-	initial := InitialOracleModelState()
-	if linearized, ok := search(initial); ok {
+	if linearized, ok := search(make(map[string]OracleModelState)); ok {
 		return linearized, nil
 	}
 
