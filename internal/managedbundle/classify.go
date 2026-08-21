@@ -22,7 +22,7 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 				ExtentIntegrity:    ExtentIntegrityMissing,
 				RecoveryState:      RecoveryStateNone,
 				SyncEligible:       false,
-				SyncEligibleReason: "no_manifest",
+				SyncEligibleReason: SyncReasonNoManifest,
 				Detail:             "no managed bundle manifest found — asset state unknown",
 			}
 		}
@@ -31,7 +31,7 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 			ExtentIntegrity:    ExtentIntegrityMissing,
 			RecoveryState:      RecoveryStateNone,
 			SyncEligible:       false,
-			SyncEligibleReason: "manifest_unreadable",
+			SyncEligibleReason: SyncReasonManifestUnreadable,
 			Detail:             fmt.Sprintf("failed to read managed bundle manifest: %v", err),
 		}
 	}
@@ -43,7 +43,7 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 			ExtentIntegrity:    ExtentIntegrityMissing,
 			RecoveryState:      RecoveryStateNone,
 			SyncEligible:       false,
-			SyncEligibleReason: "manifest_malformed",
+			SyncEligibleReason: SyncReasonManifestMalformed,
 			Detail:             "managed bundle manifest is malformed",
 		}
 	}
@@ -54,9 +54,9 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 			ExtentIntegrity:    ExtentIntegrityMissing,
 			RecoveryState:      RecoveryStateNone,
 			SyncEligible:       false,
-			SyncEligibleReason: "unsupported_schema",
+			SyncEligibleReason: SyncReasonUnsupportedSchema,
 			UnsupportedSchema:  true,
-			Detail:             fmt.Sprintf("unsupported newer manifest schema %q — upgrade gentle-ai", manifest.Schema),
+			Detail:             fmt.Sprintf("unsupported manifest schema %q", manifest.Schema),
 		}
 	}
 
@@ -68,7 +68,7 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 			ExtentIntegrity:    ExtentIntegrityUserModified,
 			RecoveryState:      recoveryState,
 			SyncEligible:       false,
-			SyncEligibleReason: "unresolved_transaction",
+			SyncEligibleReason: SyncReasonUnresolvedTransaction,
 			Detail:             journalDetail,
 		}
 	}
@@ -80,7 +80,7 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 			ExtentIntegrity:    ExtentIntegrityMissing,
 			RecoveryState:      RecoveryStateNone,
 			SyncEligible:       false,
-			SyncEligibleReason: "empty_manifest",
+			SyncEligibleReason: SyncReasonEmptyManifest,
 			Detail:             "managed bundle manifest contains no resource entries",
 		}
 	}
@@ -90,10 +90,10 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 		if res.TransactionID != "" && manifest.TransactionID != "" && res.TransactionID != manifest.TransactionID {
 			return ClassificationResult{
 				BundleIdentity:     BundleIdentityMixed,
-				ExtentIntegrity:    ExtentIntegrityMatch,
+				ExtentIntegrity:    ExtentIntegrityUserModified,
 				RecoveryState:      RecoveryStateNone,
 				SyncEligible:       false,
-				SyncEligibleReason: "mixed_resource_transactions",
+				SyncEligibleReason: SyncReasonMixedResourceTransactions,
 				Detail:             "managed bundle contains mixed resource transactions",
 			}
 		}
@@ -110,7 +110,7 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 					ExtentIntegrity:    ExtentIntegrityMissing,
 					RecoveryState:      RecoveryStateNone,
 					SyncEligible:       false,
-					SyncEligibleReason: "resource_missing",
+					SyncEligibleReason: SyncReasonResourceMissing,
 					Detail:             fmt.Sprintf("managed resource %s is missing from disk: %s", res.ResourceID, res.CanonicalPath),
 				}
 			}
@@ -119,7 +119,7 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 				ExtentIntegrity:    ExtentIntegrityUserModified,
 				RecoveryState:      RecoveryStateNone,
 				SyncEligible:       false,
-				SyncEligibleReason: "resource_unreadable",
+				SyncEligibleReason: SyncReasonResourceUnreadable,
 				Detail:             fmt.Sprintf("managed resource %s cannot be read: %v", res.ResourceID, err),
 			}
 		}
@@ -130,7 +130,7 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 				ExtentIntegrity:    ExtentIntegrityTypeChanged,
 				RecoveryState:      RecoveryStateNone,
 				SyncEligible:       false,
-				SyncEligibleReason: "type_changed",
+				SyncEligibleReason: SyncReasonTypeChanged,
 				Detail:             fmt.Sprintf("managed resource %s type changed (not a regular file): %s", res.ResourceID, res.CanonicalPath),
 			}
 		}
@@ -142,7 +142,7 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 				ExtentIntegrity:    ExtentIntegrityUserModified,
 				RecoveryState:      RecoveryStateNone,
 				SyncEligible:       false,
-				SyncEligibleReason: "resource_unreadable",
+				SyncEligibleReason: SyncReasonResourceUnreadable,
 				Detail:             fmt.Sprintf("managed resource %s cannot be read: %v", res.ResourceID, err),
 			}
 		}
@@ -155,7 +155,7 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 				ExtentIntegrity:    ExtentIntegrityUserModified,
 				RecoveryState:      RecoveryStateNone,
 				SyncEligible:       false,
-				SyncEligibleReason: "content_mismatch",
+				SyncEligibleReason: SyncReasonContentMismatch,
 				Detail:             fmt.Sprintf("managed resource %s was modified on disk", res.ResourceID),
 			}
 		}
@@ -169,7 +169,7 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 					ExtentIntegrity:    ExtentIntegrityUserModified,
 					RecoveryState:      RecoveryStateNone,
 					SyncEligible:       false,
-					SyncEligibleReason: "mode_mismatch",
+					SyncEligibleReason: SyncReasonModeMismatch,
 					Detail:             fmt.Sprintf("managed resource %s file mode was modified on disk", res.ResourceID),
 				}
 			}
@@ -184,7 +184,7 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 			ExtentIntegrity:    ExtentIntegrityMatch,
 			RecoveryState:      RecoveryStateNone,
 			SyncEligible:       false,
-			SyncEligibleReason: "catalog_digest_error",
+			SyncEligibleReason: SyncReasonCatalogDigestError,
 			Detail:             fmt.Sprintf("failed to compute catalog digest: %v", err),
 		}
 	}
@@ -196,7 +196,7 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 			ExtentIntegrity:    ExtentIntegrityMatch,
 			RecoveryState:      RecoveryStateNone,
 			SyncEligible:       true,
-			SyncEligibleReason: "aligned_with_current_binary",
+			SyncEligibleReason: SyncReasonAlignedWithCurrentBinary,
 			Detail:             fmt.Sprintf("installed managed assets match running binary (%s)", catalog.Version),
 		}
 	}
@@ -207,7 +207,7 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 		ExtentIntegrity:    ExtentIntegrityMatch,
 		RecoveryState:      RecoveryStateNone,
 		SyncEligible:       true,
-		SyncEligibleReason: "exact_committed_older_bundle",
+		SyncEligibleReason: SyncReasonExactCommittedOlderBundle,
 		Detail: fmt.Sprintf("installed assets were configured by gentle-ai %s, but running binary is %s — run 'gentle-ai sync' to update installed assets",
 			manifest.Producer.Version, catalog.Version),
 	}
@@ -216,7 +216,13 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 func checkActiveTransactions(homeDir string, manifest ManagedBundleManifest) (RecoveryState, string) {
 	txDir := filepath.Join(homeDir, ManagedDirName, ManagedSubDir, JournalDirName)
 	entries, err := os.ReadDir(txDir)
-	if err != nil || len(entries) == 0 {
+	if err != nil {
+		if os.IsNotExist(err) {
+			return RecoveryStateNone, ""
+		}
+		return RecoveryStateBlockedConflict, fmt.Sprintf("cannot read transactions directory: %v", err)
+	}
+	if len(entries) == 0 {
 		return RecoveryStateNone, ""
 	}
 
@@ -227,11 +233,11 @@ func checkActiveTransactions(homeDir string, manifest ManagedBundleManifest) (Re
 		journalPath := filepath.Join(txDir, entry.Name(), JournalFileName)
 		data, err := os.ReadFile(journalPath)
 		if err != nil {
-			continue
+			return RecoveryStateBlockedConflict, fmt.Sprintf("cannot read transaction journal %s: %v", entry.Name(), err)
 		}
 		var journal MigrationJournal
 		if err := json.Unmarshal(data, &journal); err != nil {
-			continue
+			return RecoveryStateBlockedConflict, fmt.Sprintf("malformed transaction journal %s: %v", entry.Name(), err)
 		}
 
 		if journal.LastPhase == PhaseCompleted || journal.LastPhase == PhaseRolledBack {
@@ -241,6 +247,16 @@ func checkActiveTransactions(homeDir string, manifest ManagedBundleManifest) (Re
 		// If the manifest already names this transaction, it was committed
 		if manifest.TransactionID == journal.TransactionID && manifest.Generation == journal.ProposedGeneration {
 			continue
+		}
+
+		// Non-terminal journals whose ExpectedGeneration is lower than current manifest generation are superseded
+		if manifest.Generation > 0 && journal.ExpectedGeneration < manifest.Generation {
+			continue
+		}
+
+		// If the journal declares no resources, it cannot provide recovery evidence
+		if len(journal.Resources) == 0 {
+			return RecoveryStateBlockedConflict, fmt.Sprintf("transaction %s contains no resource entries", journal.TransactionID)
 		}
 
 		// Evaluate on-disk files against journal Before / Desired states

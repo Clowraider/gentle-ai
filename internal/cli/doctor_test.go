@@ -428,6 +428,9 @@ func TestCheckInstalledAssetVersion_ManagedBundle_AlignedPass(t *testing.T) {
 	if err := os.WriteFile(filePath, desired.Content, 0644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chmod(filePath, 0644); err != nil {
+		t.Fatal(err)
+	}
 	manifest := managedbundle.ManagedBundleManifest{
 		Schema:        managedbundle.ManifestSchemaV1,
 		Generation:    1,
@@ -473,6 +476,9 @@ func TestCheckInstalledAssetVersion_ManagedBundle_StaleWarn(t *testing.T) {
 	if err := os.WriteFile(filePath, desired.Content, 0644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chmod(filePath, 0644); err != nil {
+		t.Fatal(err)
+	}
 	manifest := managedbundle.ManagedBundleManifest{
 		Schema:        managedbundle.ManifestSchemaV1,
 		Generation:    1,
@@ -504,6 +510,75 @@ func TestCheckInstalledAssetVersion_ManagedBundle_StaleWarn(t *testing.T) {
 	}
 	if !strings.Contains(got.Detail, "2.1.10") || !strings.Contains(got.Detail, "gentle-ai sync") {
 		t.Errorf("unexpected detail: %s", got.Detail)
+	}
+}
+
+func TestCheckInstalledAssetVersion_ManagedBundle_UnresolvedTransactionWarn(t *testing.T) {
+	homeDir := t.TempDir()
+	catalog := managedbundle.DefaultCatalog(AppVersion, "")
+	desired, err := catalog.Resources[0].RenderDesired()
+	if err != nil {
+		t.Fatal(err)
+	}
+	filePath := filepath.Join(homeDir, filepath.FromSlash(managedbundle.DefaultArchiveSkillRelPath))
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filePath, desired.Content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filePath, 0644); err != nil {
+		t.Fatal(err)
+	}
+	manifest := managedbundle.ManagedBundleManifest{
+		Schema:        managedbundle.ManifestSchemaV1,
+		Generation:    1,
+		TransactionID: "tx-1",
+		Producer: managedbundle.ProducerInfo{
+			Version:       AppVersion,
+			CatalogDigest: "sha256:digest",
+		},
+		Resources: []managedbundle.ResourceEntry{
+			{
+				ResourceID:     managedbundle.DefaultArchiveSkillResourceID,
+				TargetIdentity: managedbundle.TargetIdentityToken(managedbundle.DefaultArchiveSkillRelPath),
+				CanonicalPath:  managedbundle.DefaultArchiveSkillRelPath,
+				Ownership:      managedbundle.OwnershipDescriptor{Kind: managedbundle.OwnershipFullFile},
+				DesiredSHA256:  desired.SHA256,
+				ObservedSHA256: desired.SHA256,
+				Mode:           0644,
+				TransactionID:  "tx-1",
+			},
+		},
+	}
+	if err := managedbundle.WriteManifest(homeDir, manifest); err != nil {
+		t.Fatal(err)
+	}
+	journal := managedbundle.MigrationJournal{
+		Schema:             managedbundle.JournalSchemaV1,
+		TransactionID:      "tx-2",
+		ExpectedGeneration: 1,
+		ProposedGeneration: 2,
+		LastPhase:          managedbundle.PhaseApplying,
+		Resources: []managedbundle.ResourceJournalEntry{
+			{
+				ResourceID:    managedbundle.DefaultArchiveSkillResourceID,
+				CanonicalPath: managedbundle.DefaultArchiveSkillRelPath,
+				Ownership:     managedbundle.OwnershipDescriptor{Kind: managedbundle.OwnershipFullFile},
+				BeforeSHA256:  "sha256:different",
+				BeforeMode:    0644,
+				DesiredSHA256: desired.SHA256,
+				DesiredMode:   0644,
+			},
+		},
+	}
+	if err := managedbundle.WriteJournal(homeDir, journal); err != nil {
+		t.Fatal(err)
+	}
+
+	got := checkInstalledAssetVersion(homeDir)
+	if got.Status != CheckStatusWarn {
+		t.Errorf("expected warn for unresolved transaction, got %s: %s", got.Status, got.Detail)
 	}
 }
 

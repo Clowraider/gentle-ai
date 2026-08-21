@@ -59,6 +59,9 @@ func TestFixture1_B2Manifest_ExactB2Bytes_Aligned(t *testing.T) {
 	if err := os.WriteFile(filePath, b2Bytes, 0644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chmod(filePath, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	sum := sha256.Sum256(b2Bytes)
 	sha := "sha256:" + hex.EncodeToString(sum[:])
@@ -111,7 +114,10 @@ func TestFixture2_B1Manifest_ExactB1Bytes_Stale(t *testing.T) {
 	b1Bytes := []byte("# sdd-archive skill v1\n")
 	b1Mode := uint32(0644)
 	catalogB1 := makeTestCatalog("2.1.10", b1Bytes, b1Mode)
-	b1Digest, _ := catalogB1.ComputeCatalogDigest()
+	b1Digest, err := catalogB1.ComputeCatalogDigest()
+	if err != nil {
+		t.Fatalf("compute b1 digest: %v", err)
+	}
 
 	b2Bytes := []byte("# sdd-archive skill v2\n")
 	b2Mode := uint32(0644)
@@ -123,6 +129,9 @@ func TestFixture2_B1Manifest_ExactB1Bytes_Stale(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filePath, b1Bytes, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filePath, 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -162,8 +171,8 @@ func TestFixture2_B1Manifest_ExactB1Bytes_Stale(t *testing.T) {
 	if res.ExtentIntegrity != ExtentIntegrityMatch {
 		t.Errorf("got extent integrity %s, want %s", res.ExtentIntegrity, ExtentIntegrityMatch)
 	}
-	if !res.SyncEligible || res.SyncEligibleReason != "exact_committed_older_bundle" {
-		t.Errorf("got sync eligible %v (%s), want true (exact_committed_older_bundle)", res.SyncEligible, res.SyncEligibleReason)
+	if !res.SyncEligible || res.SyncEligibleReason != SyncReasonExactCommittedOlderBundle {
+		t.Errorf("got sync eligible %v (%s), want true (%s)", res.SyncEligible, res.SyncEligibleReason, SyncReasonExactCommittedOlderBundle)
 	}
 }
 
@@ -174,7 +183,10 @@ func TestFixture3_B1Manifest_ChangedByte_UserModified(t *testing.T) {
 	b1Bytes := []byte("# sdd-archive skill v1\n")
 	b1Mode := uint32(0644)
 	catalogB1 := makeTestCatalog("2.1.10", b1Bytes, b1Mode)
-	b1Digest, _ := catalogB1.ComputeCatalogDigest()
+	b1Digest, err := catalogB1.ComputeCatalogDigest()
+	if err != nil {
+		t.Fatalf("compute b1 digest: %v", err)
+	}
 
 	catalogB2 := makeTestCatalog("2.2.0", []byte("# sdd-archive skill v2\n"), 0644)
 
@@ -184,6 +196,9 @@ func TestFixture3_B1Manifest_ChangedByte_UserModified(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filePath, []byte("# user edited content\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filePath, 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -243,6 +258,9 @@ func TestFixture4_NoManifest_Unknown(t *testing.T) {
 	if err := os.WriteFile(filePath, b2Bytes, 0644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chmod(filePath, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	res := Classify(context.Background(), home, catalogB2)
 	if res.BundleIdentity != BundleIdentityUnknown {
@@ -266,6 +284,9 @@ func TestFixture5_PreparedTransaction_ObservedBefore_Recoverable(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filePath, b1Bytes, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filePath, 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -344,6 +365,9 @@ func TestFixture6_PreparedTransaction_ObservedDesired_ResumableCommit(t *testing
 	}
 	// Desired bytes already written to disk before crash
 	if err := os.WriteFile(filePath, b2Bytes, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filePath, 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -425,6 +449,9 @@ func TestFixture7_PreparedTransaction_ForeignBytes_BlockedConflict(t *testing.T)
 	if err := os.WriteFile(filePath, []byte("# conflict bytes\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chmod(filePath, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	sum1 := sha256.Sum256(b1Bytes)
 	sha1 := "sha256:" + hex.EncodeToString(sum1[:])
@@ -487,9 +514,9 @@ func TestFixture7_PreparedTransaction_ForeignBytes_BlockedConflict(t *testing.T)
 	}
 }
 
-// TestFixture8_ManifestProducerMismatch_Mixed verifies:
-// 8. Manifest producer/catalog mismatch -> mixed, not eligible.
-func TestFixture8_ManifestProducerMismatch_Mixed(t *testing.T) {
+// TestFixture8_MixedResourceTransactions_Mixed verifies:
+// 8. Manifest with mixed resource transaction IDs -> mixed, not eligible.
+func TestFixture8_MixedResourceTransactions_Mixed(t *testing.T) {
 	home := t.TempDir()
 	b1Bytes := []byte("# sdd-archive skill v1\n")
 	catalogB2 := makeTestCatalog("2.2.0", []byte("# sdd-archive skill v2\n"), 0644)
@@ -499,6 +526,9 @@ func TestFixture8_ManifestProducerMismatch_Mixed(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filePath, b1Bytes, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filePath, 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -579,13 +609,19 @@ func TestFixture10_SecondDoctorRun_ByteIdentical_ZeroWrites(t *testing.T) {
 	b2Bytes := []byte("# sdd-archive skill v2\n")
 	b2Mode := uint32(0644)
 	catalogB2 := makeTestCatalog("2.2.0", b2Bytes, b2Mode)
-	b2Digest, _ := catalogB2.ComputeCatalogDigest()
+	b2Digest, err := catalogB2.ComputeCatalogDigest()
+	if err != nil {
+		t.Fatalf("compute b2 digest: %v", err)
+	}
 
 	filePath := filepath.Join(home, filepath.FromSlash(DefaultArchiveSkillRelPath))
 	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filePath, b2Bytes, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filePath, 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -646,5 +682,110 @@ func TestFixture10_SecondDoctorRun_ByteIdentical_ZeroWrites(t *testing.T) {
 	}
 	if fileStat1.ModTime() != fileStat2.ModTime() {
 		t.Errorf("target file was mutated during read-only doctor classification")
+	}
+}
+
+// TestJournal_InvalidTransactionID_Rejected verifies that path traversal transaction IDs are rejected.
+func TestJournal_InvalidTransactionID_Rejected(t *testing.T) {
+	home := t.TempDir()
+	badJournals := []string{"../escape", "foo/bar", "foo\\bar", "..", ".", ""}
+	for _, id := range badJournals {
+		j := MigrationJournal{
+			Schema:        JournalSchemaV1,
+			TransactionID: id,
+		}
+		if err := WriteJournal(home, j); err == nil {
+			t.Errorf("expected error for transaction ID %q, got nil", id)
+		}
+	}
+}
+
+// TestJournal_EmptyResources_BlockedConflict verifies empty journal resources cannot pass as resumable.
+func TestJournal_EmptyResources_BlockedConflict(t *testing.T) {
+	home := t.TempDir()
+	catalog := makeTestCatalog("2.2.0", []byte("content"), 0644)
+	manifest := ManagedBundleManifest{
+		Schema:        ManifestSchemaV1,
+		Generation:    1,
+		TransactionID: "tx-1",
+		Producer: ProducerInfo{
+			Version:       "2.2.0",
+			CatalogDigest: "sha256:digest",
+		},
+		Resources: []ResourceEntry{
+			{
+				ResourceID:     DefaultArchiveSkillResourceID,
+				TargetIdentity: TargetIdentityToken(DefaultArchiveSkillRelPath),
+				CanonicalPath:  DefaultArchiveSkillRelPath,
+				Ownership:      OwnershipDescriptor{Kind: OwnershipFullFile},
+				DesiredSHA256:  "sha256:1",
+				ObservedSHA256: "sha256:1",
+				Mode:           0644,
+				TransactionID:  "tx-1",
+			},
+		},
+	}
+	if err := WriteManifest(home, manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	journal := MigrationJournal{
+		Schema:             JournalSchemaV1,
+		TransactionID:      "tx-2",
+		ExpectedGeneration: 1,
+		ProposedGeneration: 2,
+		LastPhase:          PhaseApplying,
+		Resources:          []ResourceJournalEntry{},
+	}
+	if err := WriteJournal(home, journal); err != nil {
+		t.Fatal(err)
+	}
+
+	res := Classify(context.Background(), home, catalog)
+	if res.RecoveryState != RecoveryStateBlockedConflict {
+		t.Errorf("got recovery state %s, want %s", res.RecoveryState, RecoveryStateBlockedConflict)
+	}
+}
+
+// TestJournal_MalformedJournal_BlockedConflict verifies malformed journal is surfaced as a conflict.
+func TestJournal_MalformedJournal_BlockedConflict(t *testing.T) {
+	home := t.TempDir()
+	catalog := makeTestCatalog("2.2.0", []byte("content"), 0644)
+	manifest := ManagedBundleManifest{
+		Schema:        ManifestSchemaV1,
+		Generation:    1,
+		TransactionID: "tx-1",
+		Producer: ProducerInfo{
+			Version:       "2.2.0",
+			CatalogDigest: "sha256:digest",
+		},
+		Resources: []ResourceEntry{
+			{
+				ResourceID:     DefaultArchiveSkillResourceID,
+				TargetIdentity: TargetIdentityToken(DefaultArchiveSkillRelPath),
+				CanonicalPath:  DefaultArchiveSkillRelPath,
+				Ownership:      OwnershipDescriptor{Kind: OwnershipFullFile},
+				DesiredSHA256:  "sha256:1",
+				ObservedSHA256: "sha256:1",
+				Mode:           0644,
+				TransactionID:  "tx-1",
+			},
+		},
+	}
+	if err := WriteManifest(home, manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := filepath.Join(home, ManagedDirName, ManagedSubDir, JournalDirName, "tx-broken")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, JournalFileName), []byte("{ invalid json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	res := Classify(context.Background(), home, catalog)
+	if res.RecoveryState != RecoveryStateBlockedConflict {
+		t.Errorf("got recovery state %s, want %s", res.RecoveryState, RecoveryStateBlockedConflict)
 	}
 }

@@ -138,13 +138,34 @@ type MigrationJournal struct {
 	Resources          []ResourceJournalEntry `json:"resources"`
 }
 
+// SyncReason represents the typed reason code for a sync eligibility determination.
+type SyncReason string
+
+const (
+	SyncReasonNoManifest                  SyncReason = "no_manifest"
+	SyncReasonManifestUnreadable          SyncReason = "manifest_unreadable"
+	SyncReasonManifestMalformed           SyncReason = "manifest_malformed"
+	SyncReasonUnsupportedSchema           SyncReason = "unsupported_schema"
+	SyncReasonUnresolvedTransaction       SyncReason = "unresolved_transaction"
+	SyncReasonEmptyManifest               SyncReason = "empty_manifest"
+	SyncReasonMixedResourceTransactions   SyncReason = "mixed_resource_transactions"
+	SyncReasonResourceMissing             SyncReason = "resource_missing"
+	SyncReasonResourceUnreadable          SyncReason = "resource_unreadable"
+	SyncReasonTypeChanged                 SyncReason = "type_changed"
+	SyncReasonContentMismatch             SyncReason = "content_mismatch"
+	SyncReasonModeMismatch                SyncReason = "mode_mismatch"
+	SyncReasonCatalogDigestError          SyncReason = "catalog_digest_error"
+	SyncReasonAlignedWithCurrentBinary    SyncReason = "aligned_with_current_binary"
+	SyncReasonExactCommittedOlderBundle   SyncReason = "exact_committed_older_bundle"
+)
+
 // ClassificationResult represents the evaluated doctor diagnostic outcome.
 type ClassificationResult struct {
 	BundleIdentity     BundleIdentity  `json:"bundle_identity"`
 	ExtentIntegrity    ExtentIntegrity `json:"extent_integrity"`
 	RecoveryState      RecoveryState   `json:"recovery_state"`
 	SyncEligible       bool            `json:"sync_eligible"`
-	SyncEligibleReason string          `json:"sync_eligible_reason"`
+	SyncEligibleReason SyncReason      `json:"sync_eligible_reason"`
 	Detail             string          `json:"detail"`
 	UnsupportedSchema  bool            `json:"unsupported_schema,omitempty"`
 }
@@ -175,6 +196,9 @@ type ResourceCatalog struct {
 }
 
 // ComputeCatalogDigest calculates a deterministic sha256 hash over descriptor metadata and desired extents.
+// Note: c.Version and c.VCSRevision are intentionally excluded from the digest calculation so that
+// the digest reflects resource metadata and rendered content only, allowing two binaries built
+// with identical assets to produce the exact same catalog digest regardless of VCS stamp or build metadata.
 func (c ResourceCatalog) ComputeCatalogDigest() (string, error) {
 	sortedResources := make([]ResourceDescriptor, len(c.Resources))
 	copy(sortedResources, c.Resources)

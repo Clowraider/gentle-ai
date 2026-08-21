@@ -644,7 +644,9 @@ func statusIcon(s CheckStatus) string {
 func checkInstalledAssetVersion(homeDir string) CheckResult {
 	catalog := managedbundle.DefaultCatalog(AppVersion, "")
 	res := managedbundle.Classify(context.Background(), homeDir, catalog)
-	if res.SyncEligibleReason != "no_manifest" && res.SyncEligibleReason != "manifest_unreadable" && res.SyncEligibleReason != "manifest_malformed" {
+	if res.SyncEligibleReason != managedbundle.SyncReasonNoManifest &&
+		res.SyncEligibleReason != managedbundle.SyncReasonManifestUnreadable &&
+		res.SyncEligibleReason != managedbundle.SyncReasonManifestMalformed {
 		switch res.BundleIdentity {
 		case managedbundle.BundleIdentityAligned:
 			return CheckResult{
@@ -663,11 +665,9 @@ func checkInstalledAssetVersion(homeDir string) CheckResult {
 				Detail: res.Detail,
 			}
 		default:
-			if res.UnsupportedSchema {
-				return CheckResult{
-					Status: CheckStatusWarn,
-					Detail: res.Detail,
-				}
+			return CheckResult{
+				Status: CheckStatusWarn,
+				Detail: res.Detail,
 			}
 		}
 	}

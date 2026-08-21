@@ -4,9 +4,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gentleman-programming/gentle-ai/v2/internal/assets"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/model"
@@ -56,40 +58,66 @@ func WriteManifest(homeDir string, m ManagedBundleManifest) error {
 	}
 
 	manifestPath := filepath.Join(dir, ManifestFileName)
-	data, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal manifest: %w", err)
-	}
-
-	tmpPath := manifestPath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		return fmt.Errorf("write temp manifest: %w", err)
-	}
-	if err := os.Rename(tmpPath, manifestPath); err != nil {
-		return fmt.Errorf("commit manifest: %w", err)
-	}
-	return nil
+	return writeAtomicJSON(manifestPath, m)
 }
 
 // WriteJournal writes an active transaction journal under homeDir/.gentle-ai/managed/v1/transactions/<tx>/journal.json.
 func WriteJournal(homeDir string, j MigrationJournal) error {
-	dir := filepath.Join(homeDir, ManagedDirName, ManagedSubDir, JournalDirName, j.TransactionID)
+	txID := strings.TrimSpace(j.TransactionID)
+	if txID == "" || strings.Contains(txID, "/") || strings.Contains(txID, "\\") || txID == "." || txID == ".." {
+		return errors.New("invalid transaction ID: path traversal or unsafe characters detected")
+	}
+
+	dir := filepath.Join(homeDir, ManagedDirName, ManagedSubDir, JournalDirName, txID)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("create transaction dir: %w", err)
 	}
 
 	journalPath := filepath.Join(dir, JournalFileName)
-	data, err := json.MarshalIndent(j, "", "  ")
+	return writeAtomicJSON(journalPath, j)
+}
+
+func writeAtomicJSON(targetPath string, v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal journal: %w", err)
+		return fmt.Errorf("marshal json: %w", err)
 	}
 
-	tmpPath := journalPath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		return fmt.Errorf("write temp journal: %w", err)
+	dir := filepath.Dir(targetPath)
+	tmpFile, err := os.CreateTemp(dir, "atomic-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
 	}
-	if err := os.Rename(tmpPath, journalPath); err != nil {
-		return fmt.Errorf("commit journal: %w", err)
+	tmpName := tmpFile.Name()
+	defer func() {
+		_ = os.Remove(tmpName)
+	}()
+
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("write temp file: %w", err)
 	}
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("sync temp file: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("close temp file: %w", err)
+	}
+
+	if err := os.Chmod(tmpName, 0644); err != nil {
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpName, targetPath); err != nil {
+		return fmt.Errorf("atomic rename to target: %w", err)
+	}
+
+	// Sync parent directory
+	if parentDir, err := os.Open(dir); err == nil {
+		_ = parentDir.Sync()
+		_ = parentDir.Close()
+	}
+
 	return nil
 }
