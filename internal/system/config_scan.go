@@ -55,7 +55,16 @@ func vscodeCopilotGlobalConfigDir(homeDir string) string {
 	return filepath.Join(homeDir, ".vscode")
 }
 
-// hasVSCodeCopilotExtension checks for github.copilot or github.copilot-* extension.
+// isCopilotExtensionDir checks if name matches github.copilot or github.copilot-<version>,
+// explicitly excluding github.copilot-chat-*.
+func isCopilotExtensionDir(name string) bool {
+	if name == "github.copilot" {
+		return true
+	}
+	return strings.HasPrefix(name, "github.copilot-") && !strings.HasPrefix(name, "github.copilot-chat")
+}
+
+// hasVSCodeCopilotExtension checks for github.copilot extension under .vscode/extensions.
 func hasVSCodeCopilotExtension(homeDir string) (bool, bool) {
 	extDir := filepath.Join(homeDir, ".vscode", "extensions")
 	entries, err := os.ReadDir(extDir)
@@ -63,7 +72,7 @@ func hasVSCodeCopilotExtension(homeDir string) (bool, bool) {
 		return false, false
 	}
 	for _, entry := range entries {
-		if entry.IsDir() && (entry.Name() == "github.copilot" || strings.HasPrefix(entry.Name(), "github.copilot-")) {
+		if entry.IsDir() && isCopilotExtensionDir(entry.Name()) {
 			return true, true
 		}
 	}
