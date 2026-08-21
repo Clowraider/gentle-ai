@@ -24,7 +24,11 @@ func RenderCustomAgents(agents []agentbuilder.RegistryEntry, cursor int, err err
 	}
 
 	if len(agents) == 0 {
-		b.WriteString(styles.SubtextStyle.Render("No custom agents created yet. Use 'Create new agent' to build one."))
+		emptyMsg := "No custom agents created yet. Use 'Create new agent' to build one."
+		if !hasEngines {
+			emptyMsg = "No custom agents created yet. Install an agent-builder engine to create one."
+		}
+		b.WriteString(styles.SubtextStyle.Render(emptyMsg))
 		b.WriteString("\n\n")
 	}
 

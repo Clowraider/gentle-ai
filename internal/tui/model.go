@@ -2175,12 +2175,16 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			var installedAgents []model.AgentID
-			if entry := reg.FindByName(m.CustomAgentDeleteTarget); entry != nil {
-				installedAgents = entry.InstalledAgents
+			entry := reg.FindByName(m.CustomAgentDeleteTarget)
+			if entry == nil {
+				// Target was already removed externally; refresh and return without touching filesystem.
+				m.CustomAgentsErr = nil
+				m.loadCustomAgents()
+				m.setScreen(ScreenCustomAgents)
+				return m, nil
 			}
 
-			adapters := m.buildAdaptersForAgent(installedAgents)
+			adapters := m.buildAdaptersForAgent(entry.InstalledAgents)
 			if _, err := agentbuilder.Uninstall(m.CustomAgentDeleteTarget, adapters); err != nil {
 				m.CustomAgentsErr = err
 				m.setScreen(ScreenCustomAgents)

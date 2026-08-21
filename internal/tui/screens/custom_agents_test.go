@@ -10,8 +10,13 @@ import (
 
 func TestRenderCustomAgents_EmptyAndPopulated(t *testing.T) {
 	out := RenderCustomAgents(nil, 0, nil, true)
-	if !strings.Contains(out, "Manage Custom Agents") || !strings.Contains(out, "No custom agents created yet") {
-		t.Errorf("expected empty message, got: %s", out)
+	if !strings.Contains(out, "Manage Custom Agents") || !strings.Contains(out, "No custom agents created yet. Use 'Create new agent' to build one.") {
+		t.Errorf("expected empty message with create instruction, got: %s", out)
+	}
+
+	outNoEngines := RenderCustomAgents(nil, 0, nil, false)
+	if !strings.Contains(outNoEngines, "Install an agent-builder engine to create one.") {
+		t.Errorf("expected engine installation instruction, got: %s", outNoEngines)
 	}
 
 	agents := []agentbuilder.RegistryEntry{

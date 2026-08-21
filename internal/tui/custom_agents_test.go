@@ -95,6 +95,25 @@ func TestCustomAgents_NavigationAndDeletion(t *testing.T) {
 	}
 }
 
+func TestCustomAgents_DeleteTargetRemovedExternally(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	m := NewModel(system.DetectionResult{}, "dev")
+	m.Screen = ScreenCustomAgentDelete
+	m.CustomAgentDeleteTarget = "non-existent-agent"
+	m.Cursor = 0 // "Delete Agent"
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	state := updated.(Model)
+	if state.Screen != ScreenCustomAgents {
+		t.Fatalf("screen = %v, want ScreenCustomAgents when target missing", state.Screen)
+	}
+	if state.CustomAgentsErr != nil {
+		t.Errorf("expected nil error on missing entry, got %v", state.CustomAgentsErr)
+	}
+}
+
 func TestCustomAgents_CreateNewAgentNavigatesToBuilder(t *testing.T) {
 	m := NewModel(system.DetectionResult{}, "dev")
 	m.AgentBuilder.AvailableEngines = []model.AgentID{model.AgentClaudeCode}
