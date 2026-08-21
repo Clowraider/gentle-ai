@@ -23,7 +23,7 @@ func RenderCustomAgents(agents []agentbuilder.RegistryEntry, cursor int, err err
 		b.WriteString("\n\n")
 	}
 
-	if len(agents) == 0 {
+	if len(agents) == 0 && err == nil {
 		emptyMsg := "No custom agents created yet. Use 'Create new agent' to build one."
 		if !hasEngines {
 			emptyMsg = "No custom agents created yet. Install an agent-builder engine to create one."

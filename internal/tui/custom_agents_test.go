@@ -99,9 +99,44 @@ func TestCustomAgents_DeleteTargetRemovedExternally(t *testing.T) {
 	tempHome := t.TempDir()
 	t.Setenv("HOME", tempHome)
 
+	// Seed custom registry with an entry
+	regPath := filepath.Join(tempHome, ".config", "gentle-ai", "custom-agents.json")
+	_ = os.MkdirAll(filepath.Dir(regPath), 0755)
+
+	claudeSkills := filepath.Join(tempHome, ".claude", "skills")
+	_ = os.MkdirAll(claudeSkills, 0755)
+
+	reg := &agentbuilder.Registry{
+		Version: 1,
+		Agents: []agentbuilder.RegistryEntry{
+			{
+				Name:             "external-agent",
+				Title:            "External Agent",
+				CreatedAt:        time.Now(),
+				GenerationEngine: model.AgentClaudeCode,
+				InstalledAgents:  []model.AgentID{model.AgentClaudeCode},
+			},
+		},
+	}
+	_ = agentbuilder.SaveRegistry(regPath, reg)
+
+	agent := &agentbuilder.GeneratedAgent{Name: "external-agent", Title: "External Agent", Content: "# External\n"}
+	adapters := []agentbuilder.AdapterInfo{{AgentID: model.AgentClaudeCode, SkillsDir: claudeSkills}}
+	_, _ = agentbuilder.Install(agent, adapters, "")
+
 	m := NewModel(system.DetectionResult{}, "dev")
+	m.setScreen(ScreenCustomAgents)
+	if len(m.CustomAgentsList) != 1 {
+		t.Fatalf("CustomAgentsList len = %d, want 1", len(m.CustomAgentsList))
+	}
+
+	// Now remove the entry externally before user confirms deletion
+	emptyReg := &agentbuilder.Registry{Version: 1, Agents: []agentbuilder.RegistryEntry{}}
+	_ = agentbuilder.SaveRegistry(regPath, emptyReg)
+
+	// User was on ScreenCustomAgentDelete for "external-agent"
 	m.Screen = ScreenCustomAgentDelete
-	m.CustomAgentDeleteTarget = "non-existent-agent"
+	m.CustomAgentDeleteTarget = "external-agent"
 	m.Cursor = 0 // "Delete Agent"
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -111,6 +146,15 @@ func TestCustomAgents_DeleteTargetRemovedExternally(t *testing.T) {
 	}
 	if state.CustomAgentsErr != nil {
 		t.Errorf("expected nil error on missing entry, got %v", state.CustomAgentsErr)
+	}
+	if len(state.CustomAgentsList) != 0 {
+		t.Errorf("expected empty list refreshed from disk, got len %d", len(state.CustomAgentsList))
+	}
+
+	// File should remain intact because target was missing from registry
+	skillFile := filepath.Join(claudeSkills, "external-agent", "SKILL.md")
+	if _, err := os.Stat(skillFile); err != nil {
+		t.Errorf("skill file should remain untouched when entry was missing from registry: %v", err)
 	}
 }
 

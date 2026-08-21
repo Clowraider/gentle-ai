@@ -14,9 +14,12 @@ func TestRenderCustomAgents_EmptyAndPopulated(t *testing.T) {
 		t.Errorf("expected empty message with create instruction, got: %s", out)
 	}
 
-	outNoEngines := RenderCustomAgents(nil, 0, nil, false)
-	if !strings.Contains(outNoEngines, "Install an agent-builder engine to create one.") {
-		t.Errorf("expected engine installation instruction, got: %s", outNoEngines)
+	outErrOnly := RenderCustomAgents(nil, 0, errors.New("cannot read registry"), true)
+	if !strings.Contains(outErrOnly, "Error: cannot read registry") {
+		t.Errorf("expected error displayed on load failure, got: %s", outErrOnly)
+	}
+	if strings.Contains(outErrOnly, "No custom agents created yet") {
+		t.Errorf("did not expect empty message when err is non-nil, got: %s", outErrOnly)
 	}
 
 	agents := []agentbuilder.RegistryEntry{
