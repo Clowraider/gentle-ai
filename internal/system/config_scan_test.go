@@ -83,8 +83,9 @@ func TestScanConfigs_AgentFieldMatchesModelAgentID(t *testing.T) {
 		"kiro-ide":       false,
 		"openclaw":       false,
 		"pi":             false,
-		"trae-ide":       false,
-		"hermes":         false,
+		"trae-ide":           false,
+		"hermes":             false,
+		"github-copilot-cli": false,
 	}
 
 	for _, c := range configs {
@@ -164,6 +165,23 @@ func TestScanConfigs_IsDirectorySetForExistingDirs(t *testing.T) {
 	}
 	if !opencodeFound {
 		t.Error("ScanConfigs() missing opencode entry")
+	}
+}
+
+func TestScanConfigs_CopilotCLIAndVSCodeDoNotCollide(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".copilot"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(.copilot): %v", err)
+	}
+
+	configs := ScanConfigs(home)
+	for _, c := range configs {
+		if c.Agent == "github-copilot-cli" && !c.Exists {
+			t.Errorf("github-copilot-cli Exists = false, want true when ~/.copilot exists")
+		}
+		if c.Agent == "vscode-copilot" && c.Exists {
+			t.Errorf("vscode-copilot Exists = true, want false when only ~/.copilot exists")
+		}
 	}
 }
 

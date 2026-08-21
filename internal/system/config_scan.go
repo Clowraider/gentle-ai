@@ -49,11 +49,10 @@ func knownAgentConfigDirs(homeDir string) []ConfigState {
 	}
 }
 
-// vscodeCopilotGlobalConfigDir returns ~/.copilot, the GlobalConfigDir used by
-// the vscode-copilot adapter across all platforms. The vscode adapter's
-// SystemPromptDir and SettingsPath are OS-dependent, but GlobalConfigDir is not.
+// vscodeCopilotGlobalConfigDir returns ~/.vscode to detect VS Code Copilot presence
+// without colliding with ~/.copilot used by github-copilot-cli.
 func vscodeCopilotGlobalConfigDir(homeDir string) string {
-	return filepath.Join(homeDir, ".copilot")
+	return filepath.Join(homeDir, ".vscode")
 }
 
 // ScanConfigs returns the presence state of every known managed agent's global
