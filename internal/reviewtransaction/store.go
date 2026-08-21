@@ -1018,14 +1018,6 @@ func mkdirAllSync(dir string, mode os.FileMode) error {
 	if dir == "." || dir == "" || dir == string(filepath.Separator) || dir == filepath.VolumeName(dir)+string(filepath.Separator) {
 		return nil
 	}
-	if info, err := os.Stat(dir); err == nil {
-		if !info.IsDir() {
-			return fmt.Errorf("%w: %q is not a directory", syscall.ENOTDIR, dir)
-		}
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
-	}
 	var stack []string
 	for p := dir; ; p = filepath.Dir(p) {
 		stack = append(stack, p)
@@ -1036,21 +1028,30 @@ func mkdirAllSync(dir string, mode os.FileMode) error {
 	}
 	for i := len(stack) - 1; i >= 0; i-- {
 		p := stack[i]
-		err := os.Mkdir(p, mode)
+		info, err := os.Lstat(p)
 		if err == nil {
-			if syncErr := SyncReviewDirectory(filepath.Dir(p)); syncErr != nil {
-				return &directorySyncError{path: p, cause: syncErr}
-			}
-		} else if os.IsExist(err) {
-			info, statErr := os.Lstat(p)
-			if statErr != nil {
-				return statErr
-			}
 			if !info.IsDir() {
 				return fmt.Errorf("%w: %q is not a directory", syscall.ENOTDIR, p)
 			}
-		} else {
+			continue
+		}
+		if !os.IsNotExist(err) {
 			return err
+		}
+		if mkdirErr := os.Mkdir(p, mode); mkdirErr == nil {
+			if syncErr := SyncReviewDirectory(filepath.Dir(p)); syncErr != nil {
+				return &directorySyncError{path: p, cause: syncErr}
+			}
+		} else if os.IsExist(mkdirErr) {
+			info2, statErr := os.Lstat(p)
+			if statErr != nil {
+				return statErr
+			}
+			if !info2.IsDir() {
+				return fmt.Errorf("%w: %q is not a directory", syscall.ENOTDIR, p)
+			}
+		} else {
+			return mkdirErr
 		}
 	}
 	return nil

@@ -299,3 +299,43 @@ func TestMkdirAllSyncFastPathWhenDirectoryExists(t *testing.T) {
 		t.Fatalf("mkdirAllSync() called syncReviewDirectory %d times on existing directory; want 0", syncCount)
 	}
 }
+
+func TestMkdirAllSyncRejectsSymlinkedTarget(t *testing.T) {
+	tempDir := t.TempDir()
+	outsideDir := filepath.Join(tempDir, "outside")
+	if err := os.Mkdir(outsideDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	storeDir := filepath.Join(tempDir, "store")
+	if err := os.Mkdir(storeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	symlinkedEvents := filepath.Join(storeDir, "events")
+	if err := os.Symlink(outsideDir, symlinkedEvents); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mkdirAllSync(symlinkedEvents, 0o755); err == nil {
+		t.Fatal("mkdirAllSync() succeeded on symlinked target directory, want error")
+	}
+}
+
+func TestMkdirAllSyncRejectsSymlinkedAncestor(t *testing.T) {
+	tempDir := t.TempDir()
+	outsideDir := filepath.Join(tempDir, "outside")
+	if err := os.Mkdir(outsideDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	symlinkedParent := filepath.Join(tempDir, "symlinked-parent")
+	if err := os.Symlink(outsideDir, symlinkedParent); err != nil {
+		t.Fatal(err)
+	}
+
+	target := filepath.Join(symlinkedParent, "nested", "events")
+	if err := mkdirAllSync(target, 0o755); err == nil {
+		t.Fatal("mkdirAllSync() succeeded with symlinked ancestor component, want error")
+	}
+}
