@@ -16,6 +16,7 @@ import (
 
 	"github.com/gentleman-programming/gentle-ai/v2/internal/components/engram"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/doctor"
+	"github.com/gentleman-programming/gentle-ai/v2/internal/managedbundle"
 )
 
 // --- checkOneTool ---
@@ -405,6 +406,103 @@ func TestCheckInstalledAssetVersion_SkewWarning(t *testing.T) {
 		t.Errorf("expected warn for version skew, got %s: %s", got.Status, got.Detail)
 	}
 	if !strings.Contains(got.Detail, "v0.9.0") || !strings.Contains(got.Detail, "gentle-ai sync") {
+		t.Errorf("unexpected detail: %s", got.Detail)
+	}
+}
+
+func TestCheckInstalledAssetVersion_ManagedBundle_AlignedPass(t *testing.T) {
+	homeDir := t.TempDir()
+	catalog := managedbundle.DefaultCatalog(AppVersion, "")
+	digest, err := catalog.ComputeCatalogDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	desired, err := catalog.Resources[0].RenderDesired()
+	if err != nil {
+		t.Fatal(err)
+	}
+	filePath := filepath.Join(homeDir, filepath.FromSlash(managedbundle.DefaultArchiveSkillRelPath))
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filePath, desired.Content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	manifest := managedbundle.ManagedBundleManifest{
+		Schema:        managedbundle.ManifestSchemaV1,
+		Generation:    1,
+		TransactionID: "tx-1",
+		Producer: managedbundle.ProducerInfo{
+			Version:       AppVersion,
+			CatalogDigest: digest,
+		},
+		Resources: []managedbundle.ResourceEntry{
+			{
+				ResourceID:     managedbundle.DefaultArchiveSkillResourceID,
+				TargetIdentity: managedbundle.TargetIdentityToken(managedbundle.DefaultArchiveSkillRelPath),
+				CanonicalPath:  managedbundle.DefaultArchiveSkillRelPath,
+				Ownership:      managedbundle.OwnershipDescriptor{Kind: managedbundle.OwnershipFullFile},
+				DesiredSHA256:  desired.SHA256,
+				ObservedSHA256: desired.SHA256,
+				Mode:           0644,
+				TransactionID:  "tx-1",
+			},
+		},
+	}
+	if err := managedbundle.WriteManifest(homeDir, manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	got := checkInstalledAssetVersion(homeDir)
+	if got.Status != CheckStatusPass {
+		t.Errorf("expected pass, got %s: %s", got.Status, got.Detail)
+	}
+}
+
+func TestCheckInstalledAssetVersion_ManagedBundle_StaleWarn(t *testing.T) {
+	homeDir := t.TempDir()
+	catalog := managedbundle.DefaultCatalog(AppVersion, "")
+	desired, err := catalog.Resources[0].RenderDesired()
+	if err != nil {
+		t.Fatal(err)
+	}
+	filePath := filepath.Join(homeDir, filepath.FromSlash(managedbundle.DefaultArchiveSkillRelPath))
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filePath, desired.Content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	manifest := managedbundle.ManagedBundleManifest{
+		Schema:        managedbundle.ManifestSchemaV1,
+		Generation:    1,
+		TransactionID: "tx-1",
+		Producer: managedbundle.ProducerInfo{
+			Version:       "2.1.10",
+			CatalogDigest: "sha256:old-digest",
+		},
+		Resources: []managedbundle.ResourceEntry{
+			{
+				ResourceID:     managedbundle.DefaultArchiveSkillResourceID,
+				TargetIdentity: managedbundle.TargetIdentityToken(managedbundle.DefaultArchiveSkillRelPath),
+				CanonicalPath:  managedbundle.DefaultArchiveSkillRelPath,
+				Ownership:      managedbundle.OwnershipDescriptor{Kind: managedbundle.OwnershipFullFile},
+				DesiredSHA256:  desired.SHA256,
+				ObservedSHA256: desired.SHA256,
+				Mode:           0644,
+				TransactionID:  "tx-1",
+			},
+		},
+	}
+	if err := managedbundle.WriteManifest(homeDir, manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	got := checkInstalledAssetVersion(homeDir)
+	if got.Status != CheckStatusWarn {
+		t.Errorf("expected warn for stale bundle, got %s: %s", got.Status, got.Detail)
+	}
+	if !strings.Contains(got.Detail, "2.1.10") || !strings.Contains(got.Detail, "gentle-ai sync") {
 		t.Errorf("unexpected detail: %s", got.Detail)
 	}
 }

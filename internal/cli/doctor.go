@@ -15,6 +15,7 @@ import (
 
 	"github.com/gentleman-programming/gentle-ai/v2/internal/components/engram"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/doctor"
+	"github.com/gentleman-programming/gentle-ai/v2/internal/managedbundle"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/state"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/storage"
 )
@@ -641,6 +642,36 @@ func statusIcon(s CheckStatus) string {
 }
 
 func checkInstalledAssetVersion(homeDir string) CheckResult {
+	catalog := managedbundle.DefaultCatalog(AppVersion, "")
+	res := managedbundle.Classify(context.Background(), homeDir, catalog)
+	if res.SyncEligibleReason != "no_manifest" && res.SyncEligibleReason != "manifest_unreadable" && res.SyncEligibleReason != "manifest_malformed" {
+		switch res.BundleIdentity {
+		case managedbundle.BundleIdentityAligned:
+			return CheckResult{
+				Status: CheckStatusPass,
+				Detail: res.Detail,
+			}
+		case managedbundle.BundleIdentityStale:
+			return CheckResult{
+				Status: CheckStatusWarn,
+				Detail: res.Detail,
+				Remedy: doctor.NewRemedy(doctor.RemedySync, "Run 'gentle-ai sync' to update installed assets"),
+			}
+		case managedbundle.BundleIdentityUserModified, managedbundle.BundleIdentityMixed:
+			return CheckResult{
+				Status: CheckStatusWarn,
+				Detail: res.Detail,
+			}
+		default:
+			if res.UnsupportedSchema {
+				return CheckResult{
+					Status: CheckStatusWarn,
+					Detail: res.Detail,
+				}
+			}
+		}
+	}
+
 	s, err := state.Read(homeDir)
 	if err != nil {
 		return CheckResult{
