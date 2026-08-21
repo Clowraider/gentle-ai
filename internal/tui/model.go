@@ -1246,7 +1246,7 @@ func (m Model) View() string {
 	case ScreenProfileDelete:
 		return screens.RenderProfileDelete(m.ProfileDeleteTarget, m.Cursor)
 	case ScreenCustomAgents:
-		return screens.RenderCustomAgents(m.CustomAgentsList, m.Cursor, m.CustomAgentsErr)
+		return screens.RenderCustomAgents(m.CustomAgentsList, m.Cursor, m.CustomAgentsErr, m.hasAgentBuilderEngines())
 	case ScreenCustomAgentDelete:
 		return screens.RenderCustomAgentDelete(m.CustomAgentDeleteTarget, m.Cursor)
 	case ScreenUpgradeSync:
@@ -1816,10 +1816,6 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 		case 4:
 			m.setScreen(ScreenModelConfig)
 		case 5:
-			// "Manage Custom Agents" — blocked when no engines are available.
-			if !m.hasAgentBuilderEngines() {
-				return m, nil
-			}
 			m.loadCustomAgents()
 			m.setScreen(ScreenCustomAgents)
 		default:
@@ -2173,12 +2169,32 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 		case 0: // "Delete Agent"
 			registryPath := filepath.Join(homeDir(), ".config", "gentle-ai", "custom-agents.json")
 			reg, err := agentbuilder.LoadRegistry(registryPath)
-			if err == nil {
-				reg.RemoveByName(m.CustomAgentDeleteTarget)
-				_ = agentbuilder.SaveRegistry(registryPath, reg)
+			if err != nil {
+				m.CustomAgentsErr = err
+				m.setScreen(ScreenCustomAgents)
+				return m, nil
 			}
-			adapters := m.buildAgentBuilderAdapters()
-			_, _ = agentbuilder.Uninstall(m.CustomAgentDeleteTarget, adapters)
+
+			var installedAgents []model.AgentID
+			if entry := reg.FindByName(m.CustomAgentDeleteTarget); entry != nil {
+				installedAgents = entry.InstalledAgents
+			}
+
+			adapters := m.buildAdaptersForAgent(installedAgents)
+			if _, err := agentbuilder.Uninstall(m.CustomAgentDeleteTarget, adapters); err != nil {
+				m.CustomAgentsErr = err
+				m.setScreen(ScreenCustomAgents)
+				return m, nil
+			}
+
+			if removed := reg.RemoveByName(m.CustomAgentDeleteTarget); removed {
+				if err := agentbuilder.SaveRegistry(registryPath, reg); err != nil {
+					m.CustomAgentsErr = err
+					m.setScreen(ScreenCustomAgents)
+					return m, nil
+				}
+			}
+			m.CustomAgentsErr = nil
 			m.loadCustomAgents()
 			m.setScreen(ScreenCustomAgents)
 		default: // "Cancel"
@@ -5054,6 +5070,23 @@ func (m *Model) loadCustomAgents() {
 	}
 	m.CustomAgentsList = reg.Agents
 	m.CustomAgentsErr = nil
+}
+
+// buildAdaptersForAgent returns AdapterInfo for the given list of agent IDs.
+func (m Model) buildAdaptersForAgent(installedIDs []model.AgentID) []agentbuilder.AdapterInfo {
+	if len(installedIDs) == 0 {
+		return m.buildAgentBuilderAdapters()
+	}
+	var adapters []agentbuilder.AdapterInfo
+	for _, id := range installedIDs {
+		if dir, ok := agentBuilderSkillsDir(id); ok {
+			adapters = append(adapters, agentbuilder.AdapterInfo{
+				AgentID:   id,
+				SkillsDir: dir,
+			})
+		}
+	}
+	return adapters
 }
 
 // hasAgentBuilderEngines reports whether any supported AI agent binary is installed.

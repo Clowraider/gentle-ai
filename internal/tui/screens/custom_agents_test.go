@@ -9,7 +9,7 @@ import (
 )
 
 func TestRenderCustomAgents_EmptyAndPopulated(t *testing.T) {
-	out := RenderCustomAgents(nil, 0, nil)
+	out := RenderCustomAgents(nil, 0, nil, true)
 	if !strings.Contains(out, "Manage Custom Agents") || !strings.Contains(out, "No custom agents created yet") {
 		t.Errorf("expected empty message, got: %s", out)
 	}
@@ -18,9 +18,12 @@ func TestRenderCustomAgents_EmptyAndPopulated(t *testing.T) {
 		{Name: "agent-one", Title: "Agent One"},
 		{Name: "agent-two", Title: "Agent Two"},
 	}
-	out = RenderCustomAgents(agents, 0, errors.New("sample error"))
+	out = RenderCustomAgents(agents, 0, errors.New("sample error"), false)
 	if !strings.Contains(out, "agent-one ─── Agent One") || !strings.Contains(out, "Error: sample error") {
 		t.Errorf("expected agent listed and error displayed, got: %s", out)
+	}
+	if !strings.Contains(out, "no engine available") {
+		t.Errorf("expected disabled create label when hasEngines=false, got: %s", out)
 	}
 	if count := CustomAgentsOptionCount(agents); count != 4 {
 		t.Errorf("CustomAgentsOptionCount = %d, want 4", count)

@@ -78,4 +78,14 @@ func TestInstall_EdgeCases(t *testing.T) {
 	if _, err := Uninstall("", []AdapterInfo{}); err == nil {
 		t.Fatal("expected error for empty agent name")
 	}
+	if _, err := Uninstall("../invalid", []AdapterInfo{}); err == nil {
+		t.Fatal("expected error for relative path traversal")
+	}
+	if _, err := Uninstall("/abs/path", []AdapterInfo{}); err == nil {
+		t.Fatal("expected error for absolute path")
+	}
+	invalidAgent := makeAgent("../bad", "content")
+	if _, err := Install(invalidAgent, []AdapterInfo{}, ""); err == nil {
+		t.Fatal("expected error for invalid agent name on install")
+	}
 }

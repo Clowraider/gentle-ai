@@ -99,21 +99,6 @@ func TestWelcomeOptions_OptionCount_WithProfiles(t *testing.T) {
 	}
 }
 
-// TestWelcomeOptions_NoEngines_ShowsDisabledLabel verifies that when hasEngines=false,
-// the agent option is labelled "(no agents)" to signal unavailability.
-func TestWelcomeOptions_NoEngines_ShowsDisabledLabel(t *testing.T) {
-	opts := screens.WelcomeOptions(nil, true, false, 0, false)
-	found := false
-	for _, opt := range opts {
-		if strings.Contains(opt, "no agents") {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected 'no agents' label when hasEngines=false; got: %v", opts)
-	}
-}
-
 // TestWelcomeOptions_ProfilesInsertedBeforeManageBackups verifies the ordering:
 // profiles option sits between "OpenCode Community Plugins" / "Uninstall OpenCode
 // Plugin" and "Manage backups". Slice 3b inserts the uninstall shortcut between

@@ -8,9 +8,9 @@ import (
 	"github.com/gentleman-programming/gentle-ai/v2/internal/tui/styles"
 )
 
-// RenderCustomAgents renders the Custom Agents list / management screen.
-// It shows all custom agents in the registry with actions to create a new one, delete, or go back.
-func RenderCustomAgents(agents []agentbuilder.RegistryEntry, cursor int, err error) string {
+// RenderCustomAgents renders the Custom Agents list and management screen.
+// It displays existing custom agents and provides actions to create, delete, or return.
+func RenderCustomAgents(agents []agentbuilder.RegistryEntry, cursor int, err error, hasEngines bool) string {
 	var b strings.Builder
 
 	b.WriteString(styles.TitleStyle.Render("Manage Custom Agents"))
@@ -36,7 +36,12 @@ func RenderCustomAgents(agents []agentbuilder.RegistryEntry, cursor int, err err
 		}
 		options = append(options, label)
 	}
-	options = append(options, "Create new agent")
+
+	createLabel := "Create new agent"
+	if !hasEngines {
+		createLabel = "Create new agent (no engine available)"
+	}
+	options = append(options, createLabel)
 	options = append(options, "Back")
 
 	b.WriteString(renderOptions(options, cursor))
