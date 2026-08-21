@@ -173,6 +173,10 @@ func TestScanConfigs_CopilotCLIAndVSCodeDoNotCollide(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".copilot"), 0o755); err != nil {
 		t.Fatalf("MkdirAll(.copilot): %v", err)
 	}
+	// An unrelated .vscode directory without the copilot extension must not trigger vscode-copilot detection.
+	if err := os.MkdirAll(filepath.Join(home, ".vscode", "extensions", "ms-python.python"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(.vscode/extensions/ms-python.python): %v", err)
+	}
 
 	configs := ScanConfigs(home)
 	for _, c := range configs {
@@ -180,7 +184,19 @@ func TestScanConfigs_CopilotCLIAndVSCodeDoNotCollide(t *testing.T) {
 			t.Errorf("github-copilot-cli Exists = false, want true when ~/.copilot exists")
 		}
 		if c.Agent == "vscode-copilot" && c.Exists {
-			t.Errorf("vscode-copilot Exists = true, want false when only ~/.copilot exists")
+			t.Errorf("vscode-copilot Exists = true, want false when only unrelated ~/.vscode exists")
+		}
+	}
+
+	// When github.copilot extension is created, vscode-copilot must be detected.
+	if err := os.MkdirAll(filepath.Join(home, ".vscode", "extensions", "github.copilot-1.2.3"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(github.copilot-1.2.3): %v", err)
+	}
+
+	configsWithExt := ScanConfigs(home)
+	for _, c := range configsWithExt {
+		if c.Agent == "vscode-copilot" && !c.Exists {
+			t.Errorf("vscode-copilot Exists = false, want true when github.copilot extension exists")
 		}
 	}
 }

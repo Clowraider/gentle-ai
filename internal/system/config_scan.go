@@ -3,6 +3,7 @@ package system
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ConfigState records the filesystem presence of an agent's global config directory.
@@ -49,21 +50,39 @@ func knownAgentConfigDirs(homeDir string) []ConfigState {
 	}
 }
 
-// vscodeCopilotGlobalConfigDir returns ~/.vscode to detect VS Code Copilot presence
-// without colliding with ~/.copilot used by github-copilot-cli.
+// vscodeCopilotGlobalConfigDir returns ~/.vscode to report VS Code Copilot root.
 func vscodeCopilotGlobalConfigDir(homeDir string) string {
 	return filepath.Join(homeDir, ".vscode")
 }
 
+// hasVSCodeCopilotExtension checks for github.copilot or github.copilot-* extension.
+func hasVSCodeCopilotExtension(homeDir string) (bool, bool) {
+	extDir := filepath.Join(homeDir, ".vscode", "extensions")
+	entries, err := os.ReadDir(extDir)
+	if err != nil {
+		return false, false
+	}
+	for _, entry := range entries {
+		if entry.IsDir() && (entry.Name() == "github.copilot" || strings.HasPrefix(entry.Name(), "github.copilot-")) {
+			return true, true
+		}
+	}
+	return false, false
+}
+
 // ScanConfigs returns the presence state of every known managed agent's global
-// This is a compatibility shim: it preserves the ConfigState contract for TUI
-// and validation callers while the canonical discovery (agents.DiscoverInstalled)
-// is used by sync and upgrade flows. Full delegation is deferred until the
-// system ← agents import cycle is resolved (follow-up change).
+// configuration directory.
 func ScanConfigs(homeDir string) []ConfigState {
 	states := knownAgentConfigDirs(homeDir)
 
 	for idx := range states {
+		if states[idx].Agent == "vscode-copilot" {
+			exists, isDir := hasVSCodeCopilotExtension(homeDir)
+			states[idx].Exists = exists
+			states[idx].IsDirectory = isDir
+			continue
+		}
+
 		info, err := os.Stat(states[idx].Path)
 		if err != nil {
 			continue
