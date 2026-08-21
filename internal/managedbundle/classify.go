@@ -267,7 +267,7 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 			}
 			expectedTarget := TargetIdentityToken(desc.CanonicalPath)
 			desiredSHA := desired.SHA256
-			if desiredSHA == "" && len(desired.Content) > 0 {
+			if desiredSHA == "" {
 				sum := sha256.Sum256(desired.Content)
 				desiredSHA = "sha256:" + hex.EncodeToString(sum[:])
 			}

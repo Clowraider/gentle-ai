@@ -213,7 +213,7 @@ func (c ResourceCatalog) ComputeCatalogDigest() (string, error) {
 			return "", fmt.Errorf("render desired extent for %s: %w", r.ResourceID, err)
 		}
 		digest := desired.SHA256
-		if digest == "" && len(desired.Content) > 0 {
+		if digest == "" {
 			sum := sha256.Sum256(desired.Content)
 			digest = "sha256:" + hex.EncodeToString(sum[:])
 		}

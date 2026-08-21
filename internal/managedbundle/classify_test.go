@@ -1278,3 +1278,79 @@ func TestClassify_EmptyDesiredExtentSHA_FallbackCalculated(t *testing.T) {
 		t.Errorf("expected aligned bundle identity with fallback sha calculation, got %s (%s)", res.BundleIdentity, res.Detail)
 	}
 }
+
+// TestClassify_EmptyFileContent_FallbackCalculated verifies empty content produces empty-file SHA256 digest.
+func TestClassify_EmptyFileContent_FallbackCalculated(t *testing.T) {
+	home := t.TempDir()
+	content := []byte("")
+	sum := sha256.Sum256(content)
+	sha := "sha256:" + hex.EncodeToString(sum[:])
+
+	catalog := ResourceCatalog{
+		Version:     "2.2.0",
+		VCSRevision: "commit-2.2.0",
+		Resources: []ResourceDescriptor{
+			{
+				ResourceID:    DefaultArchiveSkillResourceID,
+				SchemaVersion: 1,
+				ComponentID:   model.ComponentSkills,
+				AgentID:       model.AgentOpenCode,
+				CanonicalPath: DefaultArchiveSkillRelPath,
+				Ownership:     OwnershipDescriptor{Kind: OwnershipFullFile},
+				RenderDesired: func() (DesiredExtent, error) {
+					return DesiredExtent{
+						Content: content,
+						SHA256:  "", // Empty Desired SHA256 with empty content
+						Mode:    0644,
+					}, nil
+				},
+			},
+		},
+	}
+	digest, err := catalog.ComputeCatalogDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	filePath := filepath.Join(home, filepath.FromSlash(DefaultArchiveSkillRelPath))
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filePath, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filePath, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	manifest := ManagedBundleManifest{
+		Schema:        ManifestSchemaV1,
+		Generation:    1,
+		TransactionID: "tx-1",
+		Producer: ProducerInfo{
+			Version:       "2.2.0",
+			VCSRevision:   "commit-2.2.0",
+			CatalogDigest: digest,
+		},
+		Resources: []ResourceEntry{
+			{
+				ResourceID:     DefaultArchiveSkillResourceID,
+				TargetIdentity: TargetIdentityToken(DefaultArchiveSkillRelPath),
+				CanonicalPath:  DefaultArchiveSkillRelPath,
+				Ownership:      OwnershipDescriptor{Kind: OwnershipFullFile},
+				DesiredSHA256:  sha,
+				ObservedSHA256: sha,
+				Mode:           0644,
+				TransactionID:  "tx-1",
+			},
+		},
+	}
+	if err := WriteManifest(home, manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	res := Classify(context.Background(), home, catalog)
+	if res.BundleIdentity != BundleIdentityAligned {
+		t.Errorf("expected aligned bundle identity for empty file, got %s (%s)", res.BundleIdentity, res.Detail)
+	}
+}
