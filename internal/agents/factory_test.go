@@ -74,6 +74,7 @@ func TestDefaultRegistrySupportedAgentsMatchesFactoryAgents(t *testing.T) {
 		model.AgentCodex,
 		model.AgentCursor,
 		model.AgentGeminiCLI,
+		model.AgentGitHubCopilotCLI,
 		model.AgentHermes,
 		model.AgentKilocode,
 		model.AgentKimi,
@@ -103,6 +104,17 @@ func TestFactoryResolvesHermesAdapter(t *testing.T) {
 	}
 }
 
+func TestFactoryResolvesGitHubCopilotCLIAdapter(t *testing.T) {
+	adapter, err := NewAdapter(model.AgentGitHubCopilotCLI)
+	if err != nil {
+		t.Fatalf("NewAdapter(%q) returned error: %v", model.AgentGitHubCopilotCLI, err)
+	}
+
+	if got := adapter.Agent(); got != model.AgentGitHubCopilotCLI {
+		t.Fatalf("adapter.Agent() = %q, want %q", got, model.AgentGitHubCopilotCLI)
+	}
+}
+
 func TestDefaultRegistryIncludesHermes(t *testing.T) {
 	registry, err := NewDefaultRegistry()
 	if err != nil {
@@ -116,6 +128,22 @@ func TestDefaultRegistryIncludesHermes(t *testing.T) {
 
 	if got := adapter.Agent(); got != model.AgentHermes {
 		t.Fatalf("registry adapter.Agent() = %q, want %q", got, model.AgentHermes)
+	}
+}
+
+func TestDefaultRegistryIncludesGitHubCopilotCLI(t *testing.T) {
+	registry, err := NewDefaultRegistry()
+	if err != nil {
+		t.Fatalf("NewDefaultRegistry() returned error: %v", err)
+	}
+
+	adapter, ok := registry.Get(model.AgentGitHubCopilotCLI)
+	if !ok {
+		t.Fatalf("registry missing %s adapter", model.AgentGitHubCopilotCLI)
+	}
+
+	if got := adapter.Agent(); got != model.AgentGitHubCopilotCLI {
+		t.Fatalf("registry adapter.Agent() = %q, want %q", got, model.AgentGitHubCopilotCLI)
 	}
 }
 

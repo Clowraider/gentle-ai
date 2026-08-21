@@ -69,8 +69,9 @@ const (
 	AgentKiroIDE       AgentID = "kiro-ide"
 	AgentOpenClaw      AgentID = "openclaw"
 	AgentPi            AgentID = "pi"
-	AgentTrae          AgentID = "trae-ide"
-	AgentHermes        AgentID = "hermes"
+	AgentTrae              AgentID = "trae-ide"
+	AgentHermes            AgentID = "hermes"
+	AgentGitHubCopilotCLI  AgentID = "github-copilot-cli"
 )
 
 // SupportTier indicates how fully an agent supports the Gentleman AI ecosystem.
