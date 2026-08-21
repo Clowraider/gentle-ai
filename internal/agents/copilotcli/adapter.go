@@ -52,22 +52,22 @@ func (a *Adapter) Detect(_ context.Context, homeDir string) (bool, string, strin
 func (a *Adapter) InstallCommand(profile system.PlatformProfile) ([][]string, error) {
 	const pkg = "@github/copilot@latest"
 	if profile.OS == "linux" && !profile.NpmWritable {
-		return [][]string{{"sudo", "npm", "install", "-g", "--ignore-scripts", pkg}}, nil
+		return [][]string{{"sudo", "npm", "install", "-g", pkg}}, nil
 	}
-	return [][]string{{"npm", "install", "-g", "--ignore-scripts", pkg}}, nil
+	return [][]string{{"npm", "install", "-g", pkg}}, nil
 }
 
 func (a *Adapter) GlobalConfigDir(homeDir string) string  { return filepath.Join(homeDir, ".copilot") }
 func (a *Adapter) SystemPromptDir(homeDir string) string  { return filepath.Join(homeDir, ".copilot") }
-func (a *Adapter) SystemPromptFile(homeDir string) string { return filepath.Join(homeDir, ".copilot", "instructions.md") }
+func (a *Adapter) SystemPromptFile(homeDir string) string { return filepath.Join(homeDir, ".copilot", "copilot-instructions.md") }
 func (a *Adapter) SkillsDir(homeDir string) string        { return filepath.Join(homeDir, ".copilot", "skills") }
-func (a *Adapter) SettingsPath(homeDir string) string     { return filepath.Join(homeDir, ".copilot", "config.json") }
+func (a *Adapter) SettingsPath(homeDir string) string     { return filepath.Join(homeDir, ".copilot", "settings.json") }
 func (a *Adapter) MCPConfigPath(homeDir string, _ string) string {
-	return filepath.Join(homeDir, ".copilot", "config.json")
+	return filepath.Join(homeDir, ".copilot", "mcp-config.json")
 }
 
 func (a *Adapter) SystemPromptStrategy() model.SystemPromptStrategy { return model.StrategyFileReplace }
-func (a *Adapter) MCPStrategy() model.MCPStrategy                   { return model.StrategyMergeIntoSettings }
+func (a *Adapter) MCPStrategy() model.MCPStrategy                   { return model.StrategyMCPConfigFile }
 
 func (a *Adapter) SupportsOutputStyles() bool   { return a.CapabilityManifest().Features.OutputStyles }
 func (a *Adapter) OutputStyleDir(_ string) string { return "" }

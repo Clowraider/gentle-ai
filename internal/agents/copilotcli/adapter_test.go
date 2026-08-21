@@ -69,22 +69,22 @@ func TestCopilotCLIAdapter_PathsAndInstall(t *testing.T) {
 
 	if a.GlobalConfigDir(home) != filepath.Join(home, ".copilot") ||
 		a.SystemPromptDir(home) != filepath.Join(home, ".copilot") ||
-		a.SystemPromptFile(home) != filepath.Join(home, ".copilot", "instructions.md") ||
+		a.SystemPromptFile(home) != filepath.Join(home, ".copilot", "copilot-instructions.md") ||
 		a.SkillsDir(home) != filepath.Join(home, ".copilot", "skills") ||
-		a.SettingsPath(home) != filepath.Join(home, ".copilot", "config.json") ||
-		a.MCPConfigPath(home, "") != filepath.Join(home, ".copilot", "config.json") ||
+		a.SettingsPath(home) != filepath.Join(home, ".copilot", "settings.json") ||
+		a.MCPConfigPath(home, "") != filepath.Join(home, ".copilot", "mcp-config.json") ||
 		a.SystemPromptStrategy() != model.StrategyFileReplace ||
-		a.MCPStrategy() != model.StrategyMergeIntoSettings {
+		a.MCPStrategy() != model.StrategyMCPConfigFile {
 		t.Error("unexpected path or strategy")
 	}
 
 	cmd, err := a.InstallCommand(system.PlatformProfile{OS: "linux", NpmWritable: true})
-	if err != nil || len(cmd) == 0 || cmd[0][0] != "npm" {
+	if err != nil || len(cmd) == 0 || cmd[0][0] != "npm" || cmd[0][len(cmd[0])-1] != "@github/copilot@latest" {
 		t.Errorf("InstallCommand(writable) = %v, %v", cmd, err)
 	}
 
 	cmd, err = a.InstallCommand(system.PlatformProfile{OS: "linux", NpmWritable: false})
-	if err != nil || len(cmd) == 0 || cmd[0][0] != "sudo" {
+	if err != nil || len(cmd) == 0 || cmd[0][0] != "sudo" || cmd[0][len(cmd[0])-1] != "@github/copilot@latest" {
 		t.Errorf("InstallCommand(not writable) = %v, %v", cmd, err)
 	}
 }
