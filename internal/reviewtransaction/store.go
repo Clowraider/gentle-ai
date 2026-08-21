@@ -1018,6 +1018,14 @@ func mkdirAllSync(dir string, mode os.FileMode) error {
 	if dir == "." || dir == "" || dir == string(filepath.Separator) || dir == filepath.VolumeName(dir)+string(filepath.Separator) {
 		return nil
 	}
+	if info, err := os.Stat(dir); err == nil {
+		if !info.IsDir() {
+			return fmt.Errorf("%w: %q is not a directory", syscall.ENOTDIR, dir)
+		}
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
 	var stack []string
 	for p := dir; ; p = filepath.Dir(p) {
 		stack = append(stack, p)

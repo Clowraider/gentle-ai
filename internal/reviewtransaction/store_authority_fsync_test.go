@@ -273,4 +273,29 @@ func TestMkdirAllSyncRejectsExistingNonDirectory(t *testing.T) {
 	if err := mkdirAllSync(filepath.Join(filePath, "child"), 0o755); err == nil {
 		t.Fatal("mkdirAllSync() succeeded on regular file parent, want error")
 	}
+	if err := mkdirAllSync(filePath, 0o755); err == nil {
+		t.Fatal("mkdirAllSync() succeeded on regular file target, want error")
+	}
+}
+
+func TestMkdirAllSyncFastPathWhenDirectoryExists(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "existing", "dir")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var syncCount int
+	originalSync := syncReviewDirectory
+	syncReviewDirectory = func(path string) error {
+		syncCount++
+		return nil
+	}
+	t.Cleanup(func() { syncReviewDirectory = originalSync })
+
+	if err := mkdirAllSync(dir, 0o755); err != nil {
+		t.Fatalf("mkdirAllSync() error = %v", err)
+	}
+	if syncCount != 0 {
+		t.Fatalf("mkdirAllSync() called syncReviewDirectory %d times on existing directory; want 0", syncCount)
+	}
 }
