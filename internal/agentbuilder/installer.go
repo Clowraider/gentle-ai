@@ -66,6 +66,30 @@ func Install(agent *GeneratedAgent, adapters []AdapterInfo, _ string) ([]Install
 	return results, nil
 }
 
+// Uninstall removes the SKILL.md and its containing directory for agentName from each adapter's skills directory.
+// Returns a list of paths successfully removed and any non-fatal error encountered.
+func Uninstall(agentName string, adapters []AdapterInfo) ([]string, error) {
+	if agentName == "" {
+		return nil, fmt.Errorf("uninstall: agent name must not be empty")
+	}
+
+	var removed []string
+	for _, adapter := range adapters {
+		skillDir := filepath.Join(adapter.SkillsDir, agentName)
+		skillFile := filepath.Join(skillDir, "SKILL.md")
+
+		// Remove SKILL.md if present
+		if err := os.Remove(skillFile); err == nil {
+			removed = append(removed, skillFile)
+		}
+
+		// Remove directory if empty or present (best effort)
+		_ = os.Remove(skillDir)
+	}
+
+	return removed, nil
+}
+
 // rollback removes all files in paths, ignoring errors (best-effort cleanup).
 func rollback(paths []string) {
 	for _, p := range paths {
