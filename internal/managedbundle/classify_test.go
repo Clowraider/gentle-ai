@@ -836,7 +836,10 @@ func TestJournal_UnsupportedJournalSchema_BlockedConflict(t *testing.T) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	data, _ := json.Marshal(journal)
+	data, err := json.Marshal(journal)
+	if err != nil {
+		t.Fatalf("marshal journal: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, JournalFileName), data, 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -1013,5 +1016,94 @@ func TestClassify_ResourceDescriptorMismatch_NotAligned(t *testing.T) {
 	res := Classify(context.Background(), home, catalog)
 	if res.BundleIdentity == BundleIdentityAligned {
 		t.Errorf("expected mismatch to prevent aligned bundle identity, got %s", res.BundleIdentity)
+	}
+}
+
+// TestClassify_PathTraversal_Rejected verifies that path traversal canonical paths are rejected.
+func TestClassify_PathTraversal_Rejected(t *testing.T) {
+	home := t.TempDir()
+	catalog := makeTestCatalog("2.2.0", []byte("content"), 0644)
+
+	manifest := ManagedBundleManifest{
+		Schema:        ManifestSchemaV1,
+		Generation:    1,
+		TransactionID: "tx-1",
+		Producer: ProducerInfo{
+			Version:       "2.2.0",
+			CatalogDigest: "sha256:digest",
+		},
+		Resources: []ResourceEntry{
+			{
+				ResourceID:     DefaultArchiveSkillResourceID,
+				TargetIdentity: TargetIdentityToken("escape"),
+				CanonicalPath:  "../../etc/passwd",
+				Ownership:      OwnershipDescriptor{Kind: OwnershipFullFile},
+				DesiredSHA256:  "sha256:1",
+				ObservedSHA256: "sha256:1",
+				Mode:           0644,
+				TransactionID:  "tx-1",
+			},
+		},
+	}
+	if err := WriteManifest(home, manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	res := Classify(context.Background(), home, catalog)
+	if res.ExtentIntegrity != ExtentIntegrityTypeChanged || res.SyncEligibleReason != SyncReasonTypeChanged {
+		t.Errorf("expected path traversal to be rejected as type_changed, got %s (%s)", res.ExtentIntegrity, res.SyncEligibleReason)
+	}
+}
+
+// TestClassify_ProducerVersionMismatch_Stale verifies that version difference prevents aligned state.
+func TestClassify_ProducerVersionMismatch_Stale(t *testing.T) {
+	home := t.TempDir()
+	content := []byte("# content\n")
+	catalogB2 := makeTestCatalog("2.2.0", content, 0644)
+	digest, _ := catalogB2.ComputeCatalogDigest()
+
+	filePath := filepath.Join(home, filepath.FromSlash(DefaultArchiveSkillRelPath))
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filePath, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filePath, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	sum := sha256.Sum256(content)
+	sha := "sha256:" + hex.EncodeToString(sum[:])
+
+	// Same digest but older version in producer info
+	manifest := ManagedBundleManifest{
+		Schema:        ManifestSchemaV1,
+		Generation:    1,
+		TransactionID: "tx-1",
+		Producer: ProducerInfo{
+			Version:       "2.1.10",
+			CatalogDigest: digest,
+		},
+		Resources: []ResourceEntry{
+			{
+				ResourceID:     DefaultArchiveSkillResourceID,
+				TargetIdentity: TargetIdentityToken(DefaultArchiveSkillRelPath),
+				CanonicalPath:  DefaultArchiveSkillRelPath,
+				Ownership:      OwnershipDescriptor{Kind: OwnershipFullFile},
+				DesiredSHA256:  sha,
+				ObservedSHA256: sha,
+				Mode:           0644,
+				TransactionID:  "tx-1",
+			},
+		},
+	}
+	if err := WriteManifest(home, manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	res := Classify(context.Background(), home, catalogB2)
+	if res.BundleIdentity != BundleIdentityStale {
+		t.Errorf("expected stale due to version mismatch, got %s", res.BundleIdentity)
 	}
 }

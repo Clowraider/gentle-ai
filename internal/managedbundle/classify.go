@@ -5,10 +5,29 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+func resolveSafeCanonicalPath(homeDir, relPath string) (string, error) {
+	relPath = strings.TrimSpace(relPath)
+	if relPath == "" {
+		return "", errors.New("canonical path is empty")
+	}
+	if filepath.IsAbs(relPath) {
+		return "", fmt.Errorf("canonical path %q must not be absolute", relPath)
+	}
+	joined := filepath.Join(homeDir, filepath.FromSlash(relPath))
+	cleanHome := filepath.Clean(homeDir)
+	rel, err := filepath.Rel(cleanHome, joined)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("canonical path %q escapes home directory", relPath)
+	}
+	return joined, nil
+}
 
 // Classify reads the durable managed bundle manifest and journals under homeDir,
 // comparing them against the running catalog and actual files on disk.
@@ -101,7 +120,18 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 
 	// Check on-disk extents for all committed resources
 	for _, res := range manifest.Resources {
-		targetPath := filepath.Join(homeDir, filepath.FromSlash(res.CanonicalPath))
+		targetPath, pathErr := resolveSafeCanonicalPath(homeDir, res.CanonicalPath)
+		if pathErr != nil {
+			return ClassificationResult{
+				BundleIdentity:     BundleIdentityUserModified,
+				ExtentIntegrity:    ExtentIntegrityTypeChanged,
+				RecoveryState:      RecoveryStateNone,
+				SyncEligible:       false,
+				SyncEligibleReason: SyncReasonTypeChanged,
+				Detail:             fmt.Sprintf("managed resource %s has invalid path: %v", res.ResourceID, pathErr),
+			}
+		}
+
 		fi, err := os.Lstat(targetPath)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -190,7 +220,11 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 	}
 
 	// Check if manifest producer matches the running binary catalog
-	if manifest.Producer.CatalogDigest == currentCatalogDigest {
+	producerMatches := (manifest.Producer.CatalogDigest == currentCatalogDigest) &&
+		(manifest.Producer.Version == catalog.Version) &&
+		(catalog.VCSRevision == "" || manifest.Producer.VCSRevision == catalog.VCSRevision)
+
+	if producerMatches {
 		// Validate that manifest.Resources exactly matches current catalog descriptors
 		if len(manifest.Resources) != len(catalog.Resources) {
 			return ClassificationResult{
@@ -232,7 +266,7 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 				}
 			}
 			expectedTarget := TargetIdentityToken(desc.CanonicalPath)
-			if res.TargetIdentity != expectedTarget || res.CanonicalPath != desc.CanonicalPath || res.Ownership.Kind != desc.Ownership.Kind || res.DesiredSHA256 != desired.SHA256 || (desired.Mode != 0 && res.Mode != desired.Mode) {
+			if res.TargetIdentity != expectedTarget || res.CanonicalPath != desc.CanonicalPath || res.Ownership.Kind != desc.Ownership.Kind || res.DesiredSHA256 != desired.SHA256 || res.ObservedSHA256 != desired.SHA256 || (desired.Mode != 0 && res.Mode != desired.Mode) {
 				return ClassificationResult{
 					BundleIdentity:     BundleIdentityUserModified,
 					ExtentIntegrity:    ExtentIntegrityUserModified,
@@ -322,7 +356,11 @@ func checkActiveTransactions(homeDir string, manifest ManagedBundleManifest) (Re
 		allBefore := true
 
 		for _, res := range journal.Resources {
-			targetPath := filepath.Join(homeDir, filepath.FromSlash(res.CanonicalPath))
+			targetPath, pathErr := resolveSafeCanonicalPath(homeDir, res.CanonicalPath)
+			if pathErr != nil {
+				hasForeign = true
+				break
+			}
 			fi, err := os.Lstat(targetPath)
 			if err != nil {
 				if os.IsNotExist(err) && res.BeforeSHA256 == "" {
