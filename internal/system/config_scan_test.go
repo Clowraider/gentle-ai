@@ -173,30 +173,38 @@ func TestScanConfigs_CopilotCLIAndVSCodeDoNotCollide(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".copilot"), 0o755); err != nil {
 		t.Fatalf("MkdirAll(.copilot): %v", err)
 	}
-	// An unrelated .vscode directory without the copilot extension must not trigger vscode-copilot detection.
-	if err := os.MkdirAll(filepath.Join(home, ".vscode", "extensions", "ms-python.python"), 0o755); err != nil {
-		t.Fatalf("MkdirAll(.vscode/extensions/ms-python.python): %v", err)
+	for _, ext := range []string{"ms-python.python", "github.copilot-chat-0.12.0"} {
+		if err := os.MkdirAll(filepath.Join(home, ".vscode", "extensions", ext), 0o755); err != nil {
+			t.Fatalf("MkdirAll(%s): %v", ext, err)
+		}
 	}
 
 	configs := ScanConfigs(home)
+	cliFound, vscodeFound := false, false
 	for _, c := range configs {
-		if c.Agent == "github-copilot-cli" && !c.Exists {
-			t.Errorf("github-copilot-cli Exists = false, want true when ~/.copilot exists")
+		if c.Agent == "github-copilot-cli" {
+			cliFound = true
+			if !c.Exists {
+				t.Errorf("github-copilot-cli Exists = false, want true")
+			}
 		}
-		if c.Agent == "vscode-copilot" && c.Exists {
-			t.Errorf("vscode-copilot Exists = true, want false when only unrelated ~/.vscode exists")
+		if c.Agent == "vscode-copilot" {
+			vscodeFound = true
+			if c.Exists {
+				t.Errorf("vscode-copilot Exists = true, want false for copilot-chat")
+			}
 		}
 	}
+	if !cliFound || !vscodeFound {
+		t.Errorf("missing entries: cli=%v, vscode=%v", cliFound, vscodeFound)
+	}
 
-	// When github.copilot extension is created, vscode-copilot must be detected.
 	if err := os.MkdirAll(filepath.Join(home, ".vscode", "extensions", "github.copilot-1.2.3"), 0o755); err != nil {
 		t.Fatalf("MkdirAll(github.copilot-1.2.3): %v", err)
 	}
-
-	configsWithExt := ScanConfigs(home)
-	for _, c := range configsWithExt {
+	for _, c := range ScanConfigs(home) {
 		if c.Agent == "vscode-copilot" && !c.Exists {
-			t.Errorf("vscode-copilot Exists = false, want true when github.copilot extension exists")
+			t.Errorf("vscode-copilot Exists = false, want true for github.copilot-1.2.3")
 		}
 	}
 }
