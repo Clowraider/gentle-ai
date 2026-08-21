@@ -266,7 +266,13 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 				}
 			}
 			expectedTarget := TargetIdentityToken(desc.CanonicalPath)
-			if res.TargetIdentity != expectedTarget || res.CanonicalPath != desc.CanonicalPath || res.Ownership.Kind != desc.Ownership.Kind || res.DesiredSHA256 != desired.SHA256 || res.ObservedSHA256 != desired.SHA256 || (desired.Mode != 0 && res.Mode != desired.Mode) {
+			desiredSHA := desired.SHA256
+			if desiredSHA == "" && len(desired.Content) > 0 {
+				sum := sha256.Sum256(desired.Content)
+				desiredSHA = "sha256:" + hex.EncodeToString(sum[:])
+			}
+
+			if res.TargetIdentity != expectedTarget || res.CanonicalPath != desc.CanonicalPath || res.Ownership.Kind != desc.Ownership.Kind || res.DesiredSHA256 != desiredSHA || res.ObservedSHA256 != desiredSHA || (desired.Mode != 0 && res.Mode != desired.Mode) {
 				return ClassificationResult{
 					BundleIdentity:     BundleIdentityUserModified,
 					ExtentIntegrity:    ExtentIntegrityUserModified,
@@ -285,6 +291,31 @@ func Classify(ctx context.Context, homeDir string, catalog ResourceCatalog) Clas
 			SyncEligible:       true,
 			SyncEligibleReason: SyncReasonAlignedWithCurrentBinary,
 			Detail:             fmt.Sprintf("installed managed assets match running binary (%s)", catalog.Version),
+		}
+	}
+
+	// Validate that a stale producer has non-empty metadata and internally consistent committed resources
+	if manifest.Producer.Version == "" || manifest.Producer.CatalogDigest == "" {
+		return ClassificationResult{
+			BundleIdentity:     BundleIdentityUnknown,
+			ExtentIntegrity:    ExtentIntegrityMatch,
+			RecoveryState:      RecoveryStateNone,
+			SyncEligible:       false,
+			SyncEligibleReason: SyncReasonCatalogDigestError,
+			Detail:             "manifest producer metadata is incomplete",
+		}
+	}
+
+	for _, res := range manifest.Resources {
+		if res.ObservedSHA256 != res.DesiredSHA256 {
+			return ClassificationResult{
+				BundleIdentity:     BundleIdentityUserModified,
+				ExtentIntegrity:    ExtentIntegrityUserModified,
+				RecoveryState:      RecoveryStateNone,
+				SyncEligible:       false,
+				SyncEligibleReason: SyncReasonContentMismatch,
+				Detail:             fmt.Sprintf("manifest resource %s was not cleanly committed in older bundle", res.ResourceID),
+			}
 		}
 	}
 
@@ -312,6 +343,10 @@ func checkActiveTransactions(homeDir string, manifest ManagedBundleManifest) (Re
 	if len(entries) == 0 {
 		return RecoveryStateNone, ""
 	}
+
+	var finalState RecoveryState = RecoveryStateNone
+	var finalDetail string
+	unresolvedCount := 0
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -400,17 +435,34 @@ func checkActiveTransactions(homeDir string, manifest ManagedBundleManifest) (Re
 			}
 		}
 
+		var jState RecoveryState
+		var jDetail string
 		if hasForeign {
-			return RecoveryStateBlockedConflict, fmt.Sprintf("transaction %s interrupted with conflicting modifications", journal.TransactionID)
+			jState = RecoveryStateBlockedConflict
+			jDetail = fmt.Sprintf("transaction %s interrupted with conflicting modifications", journal.TransactionID)
+		} else if allDesired {
+			jState = RecoveryStateResumableDesired
+			jDetail = fmt.Sprintf("transaction %s interrupted with desired state on disk — resumable commit", journal.TransactionID)
+		} else if allBefore {
+			jState = RecoveryStateResumableBefore
+			jDetail = fmt.Sprintf("transaction %s interrupted with before state preserved — recoverable", journal.TransactionID)
+		} else {
+			jState = RecoveryStateBlockedConflict
+			jDetail = fmt.Sprintf("transaction %s in partial state", journal.TransactionID)
 		}
-		if allDesired {
-			return RecoveryStateResumableDesired, fmt.Sprintf("transaction %s interrupted with desired state on disk — resumable commit", journal.TransactionID)
+
+		if jState == RecoveryStateBlockedConflict {
+			return jState, jDetail
 		}
-		if allBefore {
-			return RecoveryStateResumableBefore, fmt.Sprintf("transaction %s interrupted with before state preserved — recoverable", journal.TransactionID)
-		}
-		return RecoveryStateBlockedConflict, fmt.Sprintf("transaction %s in partial state", journal.TransactionID)
+
+		unresolvedCount++
+		finalState = jState
+		finalDetail = jDetail
 	}
 
-	return RecoveryStateNone, ""
+	if unresolvedCount > 1 {
+		return RecoveryStateBlockedConflict, "multiple unresolved transactions detected"
+	}
+
+	return finalState, finalDetail
 }

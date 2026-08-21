@@ -1076,13 +1076,14 @@ func TestClassify_ProducerVersionMismatch_Stale(t *testing.T) {
 	sum := sha256.Sum256(content)
 	sha := "sha256:" + hex.EncodeToString(sum[:])
 
-	// Same digest but older version in producer info
+	// Same digest and same VCSRevision but older version in producer info to isolate version mismatch
 	manifest := ManagedBundleManifest{
 		Schema:        ManifestSchemaV1,
 		Generation:    1,
 		TransactionID: "tx-1",
 		Producer: ProducerInfo{
 			Version:       "2.1.10",
+			VCSRevision:   catalogB2.VCSRevision,
 			CatalogDigest: digest,
 		},
 		Resources: []ResourceEntry{
@@ -1105,5 +1106,175 @@ func TestClassify_ProducerVersionMismatch_Stale(t *testing.T) {
 	res := Classify(context.Background(), home, catalogB2)
 	if res.BundleIdentity != BundleIdentityStale {
 		t.Errorf("expected stale due to version mismatch, got %s", res.BundleIdentity)
+	}
+}
+
+// TestJournal_MultipleJournals_ConflictPrecedence verifies that conflict takes precedence when multiple journals exist.
+func TestJournal_MultipleJournals_ConflictPrecedence(t *testing.T) {
+	home := t.TempDir()
+	content := []byte("# content\n")
+	catalog := makeTestCatalog("2.2.0", content, 0644)
+	sum := sha256.Sum256(content)
+	sha := "sha256:" + hex.EncodeToString(sum[:])
+
+	filePath := filepath.Join(home, filepath.FromSlash(DefaultArchiveSkillRelPath))
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filePath, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filePath, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	manifest := ManagedBundleManifest{
+		Schema:        ManifestSchemaV1,
+		Generation:    1,
+		TransactionID: "tx-1",
+		Producer: ProducerInfo{
+			Version:       "2.1.10",
+			CatalogDigest: "sha256:old",
+		},
+		Resources: []ResourceEntry{
+			{
+				ResourceID:     DefaultArchiveSkillResourceID,
+				TargetIdentity: TargetIdentityToken(DefaultArchiveSkillRelPath),
+				CanonicalPath:  DefaultArchiveSkillRelPath,
+				Ownership:      OwnershipDescriptor{Kind: OwnershipFullFile},
+				DesiredSHA256:  sha,
+				ObservedSHA256: sha,
+				Mode:           0644,
+				TransactionID:  "tx-1",
+			},
+		},
+	}
+	if err := WriteManifest(home, manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	// Journal 1: resumable
+	journal1 := MigrationJournal{
+		Schema:             JournalSchemaV1,
+		TransactionID:      "tx-resumable",
+		ExpectedGeneration: 1,
+		ProposedGeneration: 2,
+		LastPhase:          PhaseApplying,
+		Resources: []ResourceJournalEntry{
+			{
+				ResourceID:    DefaultArchiveSkillResourceID,
+				CanonicalPath: DefaultArchiveSkillRelPath,
+				Ownership:     OwnershipDescriptor{Kind: OwnershipFullFile},
+				BeforeSHA256:  "sha256:old",
+				DesiredSHA256: sha,
+				DesiredMode:   0644,
+			},
+		},
+	}
+	if err := WriteJournal(home, journal1); err != nil {
+		t.Fatal(err)
+	}
+
+	// Journal 2: conflict
+	journal2 := MigrationJournal{
+		Schema:             JournalSchemaV1,
+		TransactionID:      "tx-conflict",
+		ExpectedGeneration: 1,
+		ProposedGeneration: 2,
+		LastPhase:          PhaseApplying,
+		Resources: []ResourceJournalEntry{
+			{
+				ResourceID:    DefaultArchiveSkillResourceID,
+				CanonicalPath: DefaultArchiveSkillRelPath,
+				Ownership:     OwnershipDescriptor{Kind: OwnershipFullFile},
+				BeforeSHA256:  "sha256:foreign",
+				DesiredSHA256: "sha256:foreign2",
+				DesiredMode:   0644,
+			},
+		},
+	}
+	if err := WriteJournal(home, journal2); err != nil {
+		t.Fatal(err)
+	}
+
+	res := Classify(context.Background(), home, catalog)
+	if res.RecoveryState != RecoveryStateBlockedConflict {
+		t.Errorf("expected RecoveryStateBlockedConflict when a conflicting journal exists, got %s", res.RecoveryState)
+	}
+}
+
+// TestClassify_EmptyDesiredExtentSHA_FallbackCalculated verifies that empty DesiredExtent.SHA256 falls back to calculated content hash.
+func TestClassify_EmptyDesiredExtentSHA_FallbackCalculated(t *testing.T) {
+	home := t.TempDir()
+	content := []byte("# content\n")
+	sum := sha256.Sum256(content)
+	sha := "sha256:" + hex.EncodeToString(sum[:])
+
+	catalog := ResourceCatalog{
+		Version:     "2.2.0",
+		VCSRevision: "commit-2.2.0",
+		Resources: []ResourceDescriptor{
+			{
+				ResourceID:    DefaultArchiveSkillResourceID,
+				SchemaVersion: 1,
+				ComponentID:   model.ComponentSkills,
+				AgentID:       model.AgentOpenCode,
+				CanonicalPath: DefaultArchiveSkillRelPath,
+				Ownership:     OwnershipDescriptor{Kind: OwnershipFullFile},
+				RenderDesired: func() (DesiredExtent, error) {
+					return DesiredExtent{
+						Content: content,
+						SHA256:  "", // Empty Desired SHA256!
+						Mode:    0644,
+					}, nil
+				},
+			},
+		},
+	}
+	digest, err := catalog.ComputeCatalogDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	filePath := filepath.Join(home, filepath.FromSlash(DefaultArchiveSkillRelPath))
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filePath, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filePath, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	manifest := ManagedBundleManifest{
+		Schema:        ManifestSchemaV1,
+		Generation:    1,
+		TransactionID: "tx-1",
+		Producer: ProducerInfo{
+			Version:       "2.2.0",
+			VCSRevision:   "commit-2.2.0",
+			CatalogDigest: digest,
+		},
+		Resources: []ResourceEntry{
+			{
+				ResourceID:     DefaultArchiveSkillResourceID,
+				TargetIdentity: TargetIdentityToken(DefaultArchiveSkillRelPath),
+				CanonicalPath:  DefaultArchiveSkillRelPath,
+				Ownership:      OwnershipDescriptor{Kind: OwnershipFullFile},
+				DesiredSHA256:  sha,
+				ObservedSHA256: sha,
+				Mode:           0644,
+				TransactionID:  "tx-1",
+			},
+		},
+	}
+	if err := WriteManifest(home, manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	res := Classify(context.Background(), home, catalog)
+	if res.BundleIdentity != BundleIdentityAligned {
+		t.Errorf("expected aligned bundle identity with fallback sha calculation, got %s (%s)", res.BundleIdentity, res.Detail)
 	}
 }

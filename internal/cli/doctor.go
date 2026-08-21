@@ -628,6 +628,7 @@ func renderDoctorReport(w io.Writer, report DoctorReport) {
 	fmt.Fprintf(w, "Status:  %s\n", status)
 }
 
+// statusIcon maps a CheckStatus to its bracketed terminal representation.
 func statusIcon(s CheckStatus) string {
 	switch s {
 	case CheckStatusPass:
@@ -641,6 +642,9 @@ func statusIcon(s CheckStatus) string {
 	}
 }
 
+// checkInstalledAssetVersion verifies that managed bundle assets on disk match the running
+// binary version, inspecting the managed bundle manifest and active transactions before
+// falling back to state.json's installed binary version.
 func checkInstalledAssetVersion(homeDir string) CheckResult {
 	catalog := managedbundle.DefaultCatalog(AppVersion, "")
 	res := managedbundle.Classify(context.Background(), homeDir, catalog)
