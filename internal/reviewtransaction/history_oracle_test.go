@@ -34,7 +34,6 @@ func TestOracleScenario1ConcurrentStart(t *testing.T) {
 
 	var authorityMu sync.Mutex
 	authorityState := OracleAuthorityAbsent
-	var budgetOwner string
 
 	startBarrier := make(chan struct{})
 	var wg sync.WaitGroup
@@ -51,12 +50,10 @@ func TestOracleScenario1ConcurrentStart(t *testing.T) {
 			var resultCode string
 			if authorityState == OracleAuthorityAbsent {
 				authorityState = OracleAuthorityReviewing
-				budgetOwner = act
 				resultCode = "created"
 			} else {
 				resultCode = "resumed"
 			}
-			curOwner := budgetOwner
 			authorityMu.Unlock()
 
 			t1 := getTime()
@@ -75,7 +72,6 @@ func TestOracleScenario1ConcurrentStart(t *testing.T) {
 				PreAuthority:     OracleAuthorityAbsent,
 				PostAuthority:    OracleAuthorityReviewing,
 			}
-			_ = curOwner
 
 			historyMu.Lock()
 			history = append(history, event)
@@ -155,19 +151,26 @@ func TestOracleScenario2ConcurrentFinalize(t *testing.T) {
 	for _, actor := range actors {
 		go func(act string) {
 			defer wg.Done()
+			<-finalizeBarrier
 			startT := getTime()
 
 			authorityMu.Lock()
 			var resultCode string
 			var obsRev string
+			var receiptIssued bool
+			var preAuth OracleAuthorityState
 			if authorityState == OracleAuthorityReviewing {
 				authorityState = OracleAuthorityApproved
 				authorityRev = "rev-2"
 				resultCode = "approved"
 				obsRev = "rev-2"
+				receiptIssued = true
+				preAuth = OracleAuthorityReviewing
 			} else {
 				resultCode = "idempotent_terminal"
 				obsRev = authorityRev
+				receiptIssued = false
+				preAuth = OracleAuthorityApproved
 			}
 			authorityMu.Unlock()
 
@@ -184,8 +187,8 @@ func TestOracleScenario2ConcurrentFinalize(t *testing.T) {
 				ExpectedRevision: "rev-1",
 				ObservedRevision: obsRev,
 				ResultCode:       resultCode,
-				ReceiptIssued:    true,
-				PreAuthority:     OracleAuthorityReviewing,
+				ReceiptIssued:    receiptIssued,
+				PreAuthority:     preAuth,
 				PostAuthority:    OracleAuthorityApproved,
 			}
 
@@ -306,6 +309,9 @@ func TestOracleScenario3ReadOnlyGatesDuringFinalize(t *testing.T) {
 	if len(linearized) != 4 {
 		t.Fatalf("linearized count = %d, want 4", len(linearized))
 	}
+	if err := checker.CheckLiveness(history, DefaultLivenessBounds()); err != nil {
+		t.Fatalf("CheckLiveness() failed: %v", err)
+	}
 }
 
 func TestOracleScenario4CrashBeforeEffectPublication(t *testing.T) {
@@ -405,6 +411,9 @@ func TestOracleScenario4CrashBeforeEffectPublication(t *testing.T) {
 	if len(linearized) != 5 {
 		t.Fatalf("linearized count = %d, want 5", len(linearized))
 	}
+	if err := checker.CheckLiveness(history, DefaultLivenessBounds()); err != nil {
+		t.Fatalf("CheckLiveness() failed: %v", err)
+	}
 }
 
 func TestOracleScenario5ConcurrentReconciliation(t *testing.T) {
@@ -498,6 +507,26 @@ func TestOracleScenario5ConcurrentReconciliation(t *testing.T) {
 	}
 	if len(linearized) != len(history) {
 		t.Fatalf("linearized events count = %d, want %d", len(linearized), len(history))
+	}
+
+	appliedIdx := -1
+	for i, e := range linearized {
+		if e.Operation == HistoryOpReconcile && e.ResultCode == "applied" {
+			appliedIdx = i
+			break
+		}
+	}
+	if appliedIdx == -1 {
+		t.Fatal("applied reconcile event not found in linearized history")
+	}
+	for i, e := range linearized {
+		if e.Operation == HistoryOpReconcile && e.ResultCode == "idempotent" && i < appliedIdx {
+			t.Fatalf("idempotent reconcile at index %d appeared before applied reconcile at index %d", i, appliedIdx)
+		}
+	}
+
+	if err := checker.CheckLiveness(history, DefaultLivenessBounds()); err != nil {
+		t.Fatalf("CheckLiveness() failed: %v", err)
 	}
 
 	appliedCount := 0

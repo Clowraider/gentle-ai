@@ -1,5 +1,6 @@
-// Package reviewtransaction — bounded sequential reference model, history recording,
+// File history_oracle.go — bounded sequential reference model, history recording,
 // and linearizability oracle for review authority transitions (Issue #1874 bounded v1).
+
 package reviewtransaction
 
 import (
@@ -7,6 +8,9 @@ import (
 	"fmt"
 	"sort"
 )
+
+// MaxHistoryEventsBound is the upper limit of events allowed in a single linearizability check.
+const MaxHistoryEventsBound = 64
 
 // HistoryOperation identifies an operation in the bounded v1 authority oracle.
 type HistoryOperation string
@@ -111,6 +115,8 @@ func (s OracleModelState) Step(e HistoryEvent) (OracleModelState, bool, string) 
 				return s, false, fmt.Sprintf("start on approved authority returned unexpected result %q", e.ResultCode)
 			}
 			return s, true, ""
+		default:
+			return s, false, fmt.Sprintf("unhandled authority state %q for start operation", s.Authority)
 		}
 
 	case HistoryOpFinalize:
@@ -141,6 +147,8 @@ func (s OracleModelState) Step(e HistoryEvent) (OracleModelState, bool, string) 
 				return s, false, fmt.Sprintf("finalize on already approved authority returned unexpected result %q", e.ResultCode)
 			}
 			return s, true, ""
+		default:
+			return s, false, fmt.Sprintf("unhandled authority state %q for finalize operation", s.Authority)
 		}
 
 	case HistoryOpStatus:
@@ -166,6 +174,8 @@ func (s OracleModelState) Step(e HistoryEvent) (OracleModelState, bool, string) 
 				return s, false, fmt.Sprintf("status on approved authority with applied effect returned %q", e.ResultCode)
 			}
 			return s, true, ""
+		default:
+			return s, false, fmt.Sprintf("unhandled authority state %q for status operation", s.Authority)
 		}
 
 	case HistoryOpValidate:
@@ -185,6 +195,8 @@ func (s OracleModelState) Step(e HistoryEvent) (OracleModelState, bool, string) 
 				return s, false, fmt.Sprintf("validate on approved authority returned %q, expected allow", e.ResultCode)
 			}
 			return s, true, ""
+		default:
+			return s, false, fmt.Sprintf("unhandled authority state %q for validate operation", s.Authority)
 		}
 
 	case HistoryOpReconcile:
@@ -211,6 +223,8 @@ func (s OracleModelState) Step(e HistoryEvent) (OracleModelState, bool, string) 
 				return s, false, fmt.Sprintf("reconcile on blocked effect returned %q", e.ResultCode)
 			}
 			return s, true, ""
+		default:
+			return s, false, fmt.Sprintf("unhandled effect state %q for reconcile operation", s.Effect)
 		}
 	}
 
@@ -226,6 +240,9 @@ type LinearizabilityChecker struct{}
 func (c LinearizabilityChecker) CheckLinearizability(events []HistoryEvent) ([]HistoryEvent, error) {
 	if len(events) == 0 {
 		return nil, nil
+	}
+	if len(events) > MaxHistoryEventsBound {
+		return nil, fmt.Errorf("history length %d exceeds maximum linearizability bound (%d)", len(events), MaxHistoryEventsBound)
 	}
 
 	// Precedence constraints: if event A finishes before event B starts (EndTime(A) < StartTime(B)),
@@ -313,23 +330,27 @@ func DefaultLivenessBounds() LivenessBounds {
 
 // CheckLiveness verifies that all operations completed within bounded progress constraints.
 func (c LinearizabilityChecker) CheckLiveness(events []HistoryEvent, bounds LivenessBounds) error {
-	actorCASAttempts := make(map[string]int)
-	transitionsCount := 0
+	type actorKey struct{ lineage, actor string }
+	actorCASAttempts := make(map[actorKey]int)
+	lineageTransitions := make(map[string]int)
 
 	for _, e := range events {
 		if e.Operation == HistoryOpStart || e.Operation == HistoryOpFinalize {
-			transitionsCount++
+			lineageTransitions[e.LineageID]++
 			if e.ResultCode == "stale_cas" || e.ResultCode == "refused_contention" {
-				actorCASAttempts[e.Actor]++
-				if actorCASAttempts[e.Actor] > bounds.MaxCASAttemptsPerActor {
-					return fmt.Errorf("actor %q exceeded max CAS attempts (%d > %d)", e.Actor, actorCASAttempts[e.Actor], bounds.MaxCASAttemptsPerActor)
+				k := actorKey{lineage: e.LineageID, actor: e.Actor}
+				actorCASAttempts[k]++
+				if actorCASAttempts[k] > bounds.MaxCASAttemptsPerActor {
+					return fmt.Errorf("actor %q in lineage %q exceeded max CAS attempts (%d > %d)", e.Actor, e.LineageID, actorCASAttempts[k], bounds.MaxCASAttemptsPerActor)
 				}
 			}
 		}
 	}
 
-	if transitionsCount > bounds.MaxTransitionsToTerminal*len(events) {
-		return fmt.Errorf("total transitions (%d) exceeded bounded progress limit", transitionsCount)
+	for lineage, count := range lineageTransitions {
+		if count > bounds.MaxTransitionsToTerminal {
+			return fmt.Errorf("lineage %q transitions (%d) exceeded bounded progress limit (%d)", lineage, count, bounds.MaxTransitionsToTerminal)
+		}
 	}
 
 	return nil
@@ -385,6 +406,9 @@ func SortHistoryEvents(events []HistoryEvent) {
 		if events[i].StartTime != events[j].StartTime {
 			return events[i].StartTime < events[j].StartTime
 		}
-		return events[i].EndTime < events[j].EndTime
+		if events[i].EndTime != events[j].EndTime {
+			return events[i].EndTime < events[j].EndTime
+		}
+		return events[i].InvocationID < events[j].InvocationID
 	})
 }

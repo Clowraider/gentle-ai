@@ -1,5 +1,6 @@
-// Package reviewtransaction — deterministic history scheduler for review authority
+// File history_scheduler.go — deterministic history scheduler for review authority
 // transitions (Issue #1874 bounded v1).
+
 package reviewtransaction
 
 import "context"
