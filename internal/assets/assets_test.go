@@ -1210,33 +1210,19 @@ func TestNonClaudeSDDOrchestratorChainStrategyParity(t *testing.T) {
 }
 
 func TestSDDOrchestratorsParallelApplySchedulingPolicyParity(t *testing.T) {
-	orchestratorPaths := []string{
-		"antigravity/sdd-orchestrator.md",
-		"claude/sdd-orchestrator-workflow.md",
-		"codex/sdd-orchestrator.md",
-		"cursor/sdd-orchestrator.md",
-		"gemini/sdd-orchestrator.md",
-		"generic/sdd-orchestrator.md",
-		"hermes/sdd-orchestrator.md",
-		"kimi/sdd-orchestrator.md",
-		"kiro/sdd-orchestrator.md",
-		"opencode/sdd-orchestrator.md",
-		"qwen/sdd-orchestrator.md",
-		"windsurf/sdd-orchestrator.md",
-	}
-
 	requiredClauses := []string{
 		"### Parallel Apply Scheduling Policy",
 		"`parallel_apply: serialized | auto` (default `serialized`)",
 		"`serialized`: launches at most one ready item actor at a time",
 		"`auto`: permits concurrent item actors only when",
+		"Overlapping, dependent, malformed, shared, unresolved, or unknown edit scopes are never auto-eligible and remain blocked or serialized.",
 		"Background-subagent availability alone never activates parallel apply.",
 		"cached at coordinator/session or change scope and is never persisted in the runtime ledger.",
 		"In automatic mode without an explicit policy, execution remains `serialized` silently",
 		"In interactive mode without an explicit policy, the coordinator asks once when at least two items are actually eligible",
 	}
 
-	for _, path := range orchestratorPaths {
+	for _, path := range sddOrchestratorAutomaticDefaultRuntimes {
 		t.Run(path, func(t *testing.T) {
 			content := MustRead(path)
 			for _, req := range requiredClauses {
@@ -1253,7 +1239,11 @@ func TestSDDOrchestratorsParallelApplySchedulingPolicyParity(t *testing.T) {
 		"`parallel_apply: serialized | auto` (default `serialized`)",
 		"`serialized`: launches at most one ready item actor at a time",
 		"`auto`: permits concurrent item actors only when",
+		"Overlapping, dependent, malformed, shared, unresolved, or unknown edit scopes are never auto-eligible and remain blocked or serialized.",
 		"Background-subagent availability alone never activates parallel apply.",
+		"cached at coordinator/session or change scope and is never persisted in the runtime ledger.",
+		"In automatic mode without an explicit policy, execution remains `serialized` silently",
+		"In interactive mode without an explicit policy, the coordinator asks once when at least two items are actually eligible",
 	} {
 		if !strings.Contains(commonContent, req) {
 			t.Fatalf("skills/_shared/sdd-phase-common.md missing parallel apply policy wording %q", req)
