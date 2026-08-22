@@ -331,6 +331,36 @@ func TestSanctionedCompactRecoveryExitsDamagedStoreBlockedContainsDisableExit(t 
 	}
 }
 
+func TestSanctionedCompactRecoveryExitsUnchangedTargetOnlyBlockedContainsDisableExit(t *testing.T) {
+	ctx := context.Background()
+	repo := initSnapshotRepo(t)
+	// Create unchanged_target edge with valid authorization: root -> child -> grandchild
+	_, _, child, _ := inspectRecoveryPair(t, repo, "child-unchanged", true, "")
+	_, _ = inspectRecoverySuccessor(t, repo, child, "grandchild-unchanged", "")
+
+	report, err := InspectCompactRecoveryEdges(ctx, repo)
+	inspectNoError(t, err)
+
+	exits, err := SanctionedCompactRecoveryExits(ctx, repo, report)
+	inspectNoError(t, err)
+
+	foundBlocked := false
+	for _, exit := range exits {
+		if exit.SuccessorLineageID == "child-unchanged-successor" {
+			if exit.Operation != "" {
+				t.Fatalf("child exit operation = %q, want empty (Blocked)", exit.Operation)
+			}
+			if !strings.Contains(exit.Blocked, "gentle-ai review mode disable --scope clone --cwd <repo>") {
+				t.Fatalf("exit.Blocked does not name runnable disable exit: %q", exit.Blocked)
+			}
+			foundBlocked = true
+		}
+	}
+	if !foundBlocked {
+		t.Fatalf("did not find child-unchanged-successor in exits: %#v", exits)
+	}
+}
+
 func inspectNoError(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
