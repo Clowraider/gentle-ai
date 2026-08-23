@@ -155,6 +155,29 @@ func TestUninstall_ErrorScenarios(t *testing.T) {
 			},
 		},
 		{
+			name: "file removal failure restores registry entry",
+			setup: func(t *testing.T, home string) uninstallCtx {
+				skillsDir := supportedSkillsDirs(home)[model.AgentOpenCode]
+				skillDir := filepath.Join(skillsDir, "blocked-agent")
+				skillFile := filepath.Join(skillDir, "SKILL.md")
+				if err := os.MkdirAll(filepath.Join(skillFile, "nested"), 0755); err != nil {
+					t.Fatalf("setup non-empty dir blocker: %v", err)
+				}
+				return uninstallCtx{
+					registryPath: writeRegistryForUninstall(t, home, entry("blocked-agent", model.AgentOpenCode)),
+					lookupName:   "blocked-agent",
+					paths:        map[string][]string{"blocked": {skillFile}},
+				}
+			},
+			wantErr: "uninstall: remove ",
+			assertion: func(t *testing.T, ctx uninstallCtx) {
+				reg := loadRegistryForTest(t, ctx.registryPath)
+				if reg.FindByName(ctx.lookupName) == nil {
+					t.Fatal("expected registry entry to be restored after file removal failure")
+				}
+			},
+		},
+		{
 			name: "absolute path name is rejected",
 			setup: func(t *testing.T, home string) uninstallCtx {
 				name := filepath.Join(home, "absolute-target")
@@ -190,9 +213,9 @@ func TestUninstall_ErrorScenarios(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected uninstall error, got nil")
 			}
-			if tt.wantErr == "uninstall: invalid registry entry name " {
+			if tt.wantErr == "uninstall: invalid registry entry name " || tt.wantErr == "uninstall: remove " {
 				if got := err.Error(); len(got) < len(tt.wantErr) || got[:len(tt.wantErr)] != tt.wantErr {
-					t.Fatalf("expected invalid-name prefix, got %v", err)
+					t.Fatalf("expected error prefix %q, got %v", tt.wantErr, err)
 				}
 			} else if err.Error() != tt.wantErr {
 				t.Fatalf("expected error %q, got %v", tt.wantErr, err)
