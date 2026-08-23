@@ -22,10 +22,15 @@ func Prepare(homeDir string, descriptors []Descriptor) (*Transaction, error) {
 		return nil, errors.New("prepare managed bundle transaction: empty catalog")
 	}
 	manifest, err := readManifest(homeDir)
+	manifestPresent := err == nil
 	if errors.Is(err, os.ErrNotExist) || err != nil && !fileExists(ManifestPath(homeDir)) {
 		manifest = Manifest{Schema: ManifestSchemaV1}
 	} else if err != nil {
 		return nil, err
+	}
+	committed := make(map[string]Resource, len(manifest.Resources))
+	for _, resource := range manifest.Resources {
+		committed[resource.ResourceID] = resource
 	}
 	id := fmt.Sprintf("tx-%d", time.Now().UTC().UnixNano())
 	journal := Journal{Schema: JournalSchemaV1, TransactionID: id, ExpectedGeneration: manifest.Generation, ProposedGeneration: manifest.Generation + 1, Phase: "prepared"}
@@ -49,6 +54,10 @@ func Prepare(homeDir string, descriptors []Descriptor) (*Transaction, error) {
 				return nil, err
 			}
 			resource.BeforeSHA256, resource.BeforeMode = SHA256(content), uint32(info.Mode().Perm())
+			previous, trusted := committed[descriptor.ResourceID]
+			if !manifestPresent || !trusted || previous.CanonicalPath != descriptor.CanonicalPath || previous.Ownership != descriptor.Ownership || previous.ObservedSHA256 != resource.BeforeSHA256 || previous.Mode != resource.BeforeMode {
+				return nil, fmt.Errorf("managed resource %s has no exact committed ownership evidence", descriptor.ResourceID)
+			}
 		}
 		journal.Resources = append(journal.Resources, resource)
 	}
