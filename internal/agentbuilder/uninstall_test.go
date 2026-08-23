@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,11 +83,13 @@ func TestUninstall_SuccessScenarios(t *testing.T) {
 
 func TestUninstall_ErrorScenarios(t *testing.T) {
 	tests := []struct {
-		name      string
-		setup     func(t *testing.T, home string) uninstallCtx
-		stubSave  func(string, *Registry) error
-		wantErr   string
-		assertion func(t *testing.T, ctx uninstallCtx)
+		name              string
+		setup             func(t *testing.T, home string) uninstallCtx
+		stubSave          func(string, *Registry) error
+		wantErr           string
+		errIsPrefix       bool
+		allowRemovedPaths bool
+		assertion         func(t *testing.T, ctx uninstallCtx)
 	}{
 		{
 			name: "save registry failure preserves registry entry on disk while files removed",
@@ -97,8 +100,9 @@ func TestUninstall_ErrorScenarios(t *testing.T) {
 					paths:        map[string][]string{"owned": createOwnedSkillFiles(t, home, "save-failure-agent", []model.AgentID{model.AgentClaudeCode, model.AgentOpenCode})},
 				}
 			},
-			stubSave: func(string, *Registry) error { return fmt.Errorf("boom") },
-			wantErr:  "uninstall: save registry: boom",
+			stubSave:          func(string, *Registry) error { return fmt.Errorf("boom") },
+			wantErr:           "uninstall: save registry: boom",
+			allowRemovedPaths: true,
 			assertion: func(t *testing.T, ctx uninstallCtx) {
 				assertPathSets(t, ctx.paths, false, "owned")
 				if loadRegistryForTest(t, ctx.registryPath).FindByName(ctx.lookupName) == nil {
@@ -117,7 +121,8 @@ func TestUninstall_ErrorScenarios(t *testing.T) {
 					paths:        map[string][]string{"outside": {outside}},
 				}
 			},
-			wantErr: "uninstall: invalid registry entry name ",
+			wantErr:     "uninstall: invalid registry entry name ",
+			errIsPrefix: true,
 			assertion: func(t *testing.T, ctx uninstallCtx) {
 				assertPathSets(t, ctx.paths, true, "outside")
 				reg := loadRegistryForTest(t, ctx.registryPath)
@@ -134,7 +139,8 @@ func TestUninstall_ErrorScenarios(t *testing.T) {
 					lookupName:   "../escaped-target",
 				}
 			},
-			wantErr: "uninstall: invalid registry entry name ",
+			wantErr:     "uninstall: invalid registry entry name ",
+			errIsPrefix: true,
 			assertion: func(t *testing.T, ctx uninstallCtx) {
 				reg := loadRegistryForTest(t, ctx.registryPath)
 				if reg.FindByName(ctx.lookupName) == nil {
@@ -150,7 +156,8 @@ func TestUninstall_ErrorScenarios(t *testing.T) {
 					lookupName:   "../escaped-target",
 				}
 			},
-			wantErr: "uninstall: invalid registry entry name ",
+			wantErr:     "uninstall: invalid registry entry name ",
+			errIsPrefix: true,
 			assertion: func(t *testing.T, ctx uninstallCtx) {
 				reg := loadRegistryForTest(t, ctx.registryPath)
 				if reg.FindByName(ctx.lookupName) == nil {
@@ -173,7 +180,8 @@ func TestUninstall_ErrorScenarios(t *testing.T) {
 					paths:        map[string][]string{"blocked": {skillFile}},
 				}
 			},
-			wantErr: "uninstall: remove ",
+			wantErr:     "uninstall: remove ",
+			errIsPrefix: true,
 			assertion: func(t *testing.T, ctx uninstallCtx) {
 				reg := loadRegistryForTest(t, ctx.registryPath)
 				if reg.FindByName(ctx.lookupName) == nil {
@@ -193,7 +201,8 @@ func TestUninstall_ErrorScenarios(t *testing.T) {
 					paths:        map[string][]string{"outside": {outside}},
 				}
 			},
-			wantErr: "uninstall: invalid registry entry name ",
+			wantErr:     "uninstall: invalid registry entry name ",
+			errIsPrefix: true,
 			assertion: func(t *testing.T, ctx uninstallCtx) {
 				assertPathSets(t, ctx.paths, true, "outside")
 				reg := loadRegistryForTest(t, ctx.registryPath)
@@ -217,14 +226,14 @@ func TestUninstall_ErrorScenarios(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected uninstall error, got nil")
 			}
-			if tt.wantErr == "uninstall: invalid registry entry name " || tt.wantErr == "uninstall: remove " {
-				if got := err.Error(); len(got) < len(tt.wantErr) || got[:len(tt.wantErr)] != tt.wantErr {
+			if tt.errIsPrefix {
+				if !strings.HasPrefix(err.Error(), tt.wantErr) {
 					t.Fatalf("expected error prefix %q, got %v", tt.wantErr, err)
 				}
 			} else if err.Error() != tt.wantErr {
 				t.Fatalf("expected error %q, got %v", tt.wantErr, err)
 			}
-			if tt.name != "save registry failure preserves registry entry on disk while files removed" && len(result.RemovedPaths) != 0 {
+			if !tt.allowRemovedPaths && len(result.RemovedPaths) != 0 {
 				t.Fatalf("RemovedPaths = %v, want empty", result.RemovedPaths)
 			}
 			assertAgentIDs(t, result.SkippedAgents, nil)

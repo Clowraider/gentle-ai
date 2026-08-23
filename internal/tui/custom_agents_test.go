@@ -10,13 +10,25 @@ import (
 	"github.com/gentleman-programming/gentle-ai/v2/internal/agentbuilder"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/model"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/system"
+	"github.com/gentleman-programming/gentle-ai/v2/internal/tui/screens"
 )
 
 func TestCustomAgents_WelcomeOptionSelection(t *testing.T) {
 	m := NewModel(system.DetectionResult{}, "dev")
 	m.AgentBuilder.AvailableEngines = []model.AgentID{model.AgentClaudeCode}
 
-	m.Cursor = 5 // "Manage Custom Agents"
+	opts := screens.WelcomeOptions(nil, false, false, 0, true)
+	idx := -1
+	for i, opt := range opts {
+		if opt == "Manage Custom Agents" {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		t.Fatal("option 'Manage Custom Agents' not found")
+	}
+	m.Cursor = idx
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if updated.(Model).Screen != ScreenCustomAgents {
 		t.Fatalf("screen = %v, want ScreenCustomAgents", updated.(Model).Screen)
@@ -28,10 +40,14 @@ func TestCustomAgents_NavigationAndDeletion(t *testing.T) {
 	t.Setenv("HOME", tempHome)
 
 	regPath := filepath.Join(tempHome, ".config", "gentle-ai", "custom-agents.json")
-	_ = os.MkdirAll(filepath.Dir(regPath), 0755)
+	if err := os.MkdirAll(filepath.Dir(regPath), 0755); err != nil {
+		t.Fatalf("MkdirAll regPath: %v", err)
+	}
 
 	claudeSkills := filepath.Join(tempHome, ".claude", "skills")
-	_ = os.MkdirAll(claudeSkills, 0755)
+	if err := os.MkdirAll(claudeSkills, 0755); err != nil {
+		t.Fatalf("MkdirAll claudeSkills: %v", err)
+	}
 
 	reg := &agentbuilder.Registry{
 		Version: 1,
@@ -45,11 +61,20 @@ func TestCustomAgents_NavigationAndDeletion(t *testing.T) {
 			},
 		},
 	}
-	_ = agentbuilder.SaveRegistry(regPath, reg)
+	if err := agentbuilder.SaveRegistry(regPath, reg); err != nil {
+		t.Fatalf("SaveRegistry: %v", err)
+	}
 
 	agent := &agentbuilder.GeneratedAgent{Name: "dummy-agent", Title: "Dummy Agent", Content: "# Dummy\n"}
 	adapters := []agentbuilder.AdapterInfo{{AgentID: model.AgentClaudeCode, SkillsDir: claudeSkills}}
-	_, _ = agentbuilder.Install(agent, adapters, "")
+	if _, err := agentbuilder.Install(agent, adapters, ""); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	skillFile := filepath.Join(claudeSkills, "dummy-agent", "SKILL.md")
+	if _, err := os.Stat(skillFile); err != nil {
+		t.Fatalf("precondition: skill file must exist: %v", err)
+	}
 
 	m := NewModel(system.DetectionResult{
 		Configs: []system.ConfigState{{Agent: string(model.AgentClaudeCode), Exists: true}},
@@ -89,7 +114,6 @@ func TestCustomAgents_NavigationAndDeletion(t *testing.T) {
 		t.Fatalf("deletion not completed cleanly in state: %+v", state)
 	}
 
-	skillFile := filepath.Join(claudeSkills, "dummy-agent", "SKILL.md")
 	if _, err := os.Stat(skillFile); !os.IsNotExist(err) {
 		t.Errorf("skill file still exists: %s", skillFile)
 	}
@@ -101,10 +125,14 @@ func TestCustomAgents_DeleteTargetRemovedExternally(t *testing.T) {
 
 	// Seed custom registry with an entry
 	regPath := filepath.Join(tempHome, ".config", "gentle-ai", "custom-agents.json")
-	_ = os.MkdirAll(filepath.Dir(regPath), 0755)
+	if err := os.MkdirAll(filepath.Dir(regPath), 0755); err != nil {
+		t.Fatalf("MkdirAll regPath: %v", err)
+	}
 
 	claudeSkills := filepath.Join(tempHome, ".claude", "skills")
-	_ = os.MkdirAll(claudeSkills, 0755)
+	if err := os.MkdirAll(claudeSkills, 0755); err != nil {
+		t.Fatalf("MkdirAll claudeSkills: %v", err)
+	}
 
 	reg := &agentbuilder.Registry{
 		Version: 1,
@@ -118,11 +146,15 @@ func TestCustomAgents_DeleteTargetRemovedExternally(t *testing.T) {
 			},
 		},
 	}
-	_ = agentbuilder.SaveRegistry(regPath, reg)
+	if err := agentbuilder.SaveRegistry(regPath, reg); err != nil {
+		t.Fatalf("SaveRegistry: %v", err)
+	}
 
 	agent := &agentbuilder.GeneratedAgent{Name: "external-agent", Title: "External Agent", Content: "# External\n"}
 	adapters := []agentbuilder.AdapterInfo{{AgentID: model.AgentClaudeCode, SkillsDir: claudeSkills}}
-	_, _ = agentbuilder.Install(agent, adapters, "")
+	if _, err := agentbuilder.Install(agent, adapters, ""); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
 
 	m := NewModel(system.DetectionResult{}, "dev")
 	m.setScreen(ScreenCustomAgents)
@@ -132,7 +164,9 @@ func TestCustomAgents_DeleteTargetRemovedExternally(t *testing.T) {
 
 	// Now remove the entry externally before user confirms deletion
 	emptyReg := &agentbuilder.Registry{Version: 1, Agents: []agentbuilder.RegistryEntry{}}
-	_ = agentbuilder.SaveRegistry(regPath, emptyReg)
+	if err := agentbuilder.SaveRegistry(regPath, emptyReg); err != nil {
+		t.Fatalf("SaveRegistry: %v", err)
+	}
 
 	// User was on ScreenCustomAgentDelete for "external-agent"
 	m.Screen = ScreenCustomAgentDelete
@@ -159,6 +193,8 @@ func TestCustomAgents_DeleteTargetRemovedExternally(t *testing.T) {
 }
 
 func TestCustomAgents_CreateNewAgentNavigatesToBuilder(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
 	m := NewModel(system.DetectionResult{}, "dev")
 	m.AgentBuilder.AvailableEngines = []model.AgentID{model.AgentClaudeCode}
 

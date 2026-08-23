@@ -1816,7 +1816,6 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 		case 4:
 			m.setScreen(ScreenModelConfig)
 		case 5:
-			m.loadCustomAgents()
 			m.setScreen(ScreenCustomAgents)
 		default:
 			next := 6
@@ -2168,7 +2167,7 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 		switch m.Cursor {
 		case 0: // "Delete Agent"
 			home := homeDir()
-			registryPath := filepath.Join(home, ".config", "gentle-ai", "custom-agents.json")
+			registryPath := customAgentsRegistryPath()
 			_, err := agentbuilder.Uninstall(registryPath, m.CustomAgentDeleteTarget, home)
 			if err != nil {
 				reg, loadErr := agentbuilder.LoadRegistry(registryPath)
@@ -3802,9 +3801,6 @@ func (m *Model) setScreen(next Screen) {
 	}
 	if next == ScreenCustomAgents {
 		m.loadCustomAgents()
-		if m.Cursor >= len(m.CustomAgentsList)+2 {
-			m.Cursor = 0
-		}
 	}
 	if next == ScreenUninstallMode {
 		m.refreshUninstallProfiles()
@@ -5048,9 +5044,14 @@ func (m Model) detectAgentBuilderEngines() []model.AgentID {
 	return available
 }
 
+// customAgentsRegistryPath resolves the user custom-agent registry file.
+func customAgentsRegistryPath() string {
+	return filepath.Join(homeDir(), ".config", "gentle-ai", "custom-agents.json")
+}
+
 // loadCustomAgents populates CustomAgentsList from the custom-agents.json registry.
 func (m *Model) loadCustomAgents() {
-	registryPath := filepath.Join(homeDir(), ".config", "gentle-ai", "custom-agents.json")
+	registryPath := customAgentsRegistryPath()
 	reg, err := agentbuilder.LoadRegistry(registryPath)
 	if err != nil {
 		m.CustomAgentsList = nil
