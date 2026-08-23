@@ -35,6 +35,7 @@ import (
 	"github.com/gentleman-programming/gentle-ai/v2/internal/components/skills"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/components/theme"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/installcmd"
+	"github.com/gentleman-programming/gentle-ai/v2/internal/managedbundle"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/model"
 	opencodeactivation "github.com/gentleman-programming/gentle-ai/v2/internal/opencode"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/pipeline"
@@ -205,6 +206,10 @@ func RunInstall(args []string, detection system.DetectionResult) (InstallResult,
 		return result, err
 	}
 	defer runtime.state.cleanupCompatibilityTransaction()
+	bundleTransaction, err := prepareManagedBundleTransaction(homeDir, input.Scope, resolved.Agents)
+	if err != nil {
+		return result, fmt.Errorf("prepare managed bundle transaction: %w", err)
+	}
 
 	// Print dependency warnings before the pipeline starts (CLI only).
 	// The TUI surfaces these on the complete screen instead.
@@ -253,6 +258,15 @@ func RunInstall(args []string, detection system.DetectionResult) (InstallResult,
 			verificationErr = errors.Join(verificationErr, rollback.Err)
 		}
 		return result, verificationErr
+	}
+	if bundleTransaction != nil {
+		if err := bundleTransaction.VerifyAndCommit(AppVersion, ""); err != nil {
+			commitErr := fmt.Errorf("commit managed bundle transaction: %w", err)
+			if rollback := orchestrator.Rollback(result.Execution); rollback.Err != nil {
+				commitErr = errors.Join(commitErr, rollback.Err)
+			}
+			return result, commitErr
+		}
 	}
 
 	// Persist the user's agent selection and model assignments so that future
@@ -303,6 +317,17 @@ func RunInstall(args []string, detection system.DetectionResult) (InstallResult,
 	}
 
 	return result, nil
+}
+
+func prepareManagedBundleTransaction(homeDir string, scope InstallScope, agents []model.AgentID) (*managedbundle.Transaction, error) {
+	if scope != ScopeGlobal || !containsAgent(agents, model.AgentOpenCode) {
+		return nil, nil
+	}
+	catalog, err := managedbundle.Catalog()
+	if err != nil {
+		return nil, err
+	}
+	return managedbundle.Prepare(homeDir, catalog)
 }
 
 func persistInstallState(homeDir string, newState state.InstallState, agentIDs []string, flags InstallFlags, writer string) error {

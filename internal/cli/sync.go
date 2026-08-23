@@ -1582,6 +1582,10 @@ func runSyncWithSelection(homeDir string, selection model.Selection, background 
 		return result, err
 	}
 	defer rt.state.cleanupCompatibilityTransaction()
+	bundleTransaction, err := prepareManagedBundleTransaction(homeDir, ScopeGlobal, selection.Agents)
+	if err != nil {
+		return result, fmt.Errorf("prepare managed bundle transaction: %w", err)
+	}
 	rt.backgroundActivation = background.activationPlan
 	if rt.backgroundActivation != nil {
 		rt.runtimeReady = rt.backgroundActivation.Capability().Ready()
@@ -1647,6 +1651,15 @@ func runSyncWithSelection(homeDir string, selection model.Selection, background 
 			verificationErr = errors.Join(verificationErr, rollback.Err)
 		}
 		return result, verificationErr
+	}
+	if bundleTransaction != nil {
+		if err := bundleTransaction.VerifyAndCommit(AppVersion, ""); err != nil {
+			commitErr := fmt.Errorf("commit managed bundle transaction: %w", err)
+			if rollback := orchestrator.Rollback(result.Execution); rollback.Err != nil {
+				commitErr = errors.Join(commitErr, rollback.Err)
+			}
+			return result, commitErr
+		}
 	}
 	writer, err := managedAssetDigest()
 	if err != nil {

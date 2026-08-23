@@ -78,6 +78,9 @@ func ManifestPath(homeDir string) string {
 func ClassifyExtents(homeDir, version, revision string, descriptors []Descriptor) Classification {
 	manifest, err := readManifest(homeDir)
 	if err != nil {
+		if recovery, detail := classifyRecovery(homeDir, Manifest{}); recovery != RecoveryNone {
+			return Classification{BundleIdentity: BundleUnknown, ExtentIntegrity: ExtentUnknown, RecoveryState: recovery, Detail: detail}
+		}
 		return Classification{BundleIdentity: BundleUnknown, ExtentIntegrity: ExtentUnknown, Detail: err.Error()}
 	}
 	if manifest.Schema != ManifestSchemaV1 || len(manifest.Resources) != len(descriptors) || len(descriptors) == 0 {
