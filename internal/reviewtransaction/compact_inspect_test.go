@@ -320,7 +320,7 @@ func TestSanctionedCompactRecoveryExitsDamagedStoreBlockedContainsDisableExit(t 
 			if exit.Operation != "" {
 				t.Fatalf("child exit operation = %q, want empty (Blocked)", exit.Operation)
 			}
-			if !strings.Contains(exit.Blocked, "gentle-ai review mode disable --scope clone --cwd <repo>") {
+			if !strings.Contains(exit.Blocked, "gentle-ai review mode disable --scope clone --cwd .") {
 				t.Fatalf("exit.Blocked does not name runnable disable exit: %q", exit.Blocked)
 			}
 			foundBlocked = true
@@ -350,7 +350,7 @@ func TestSanctionedCompactRecoveryExitsUnchangedTargetOnlyBlockedContainsDisable
 			if exit.Operation != "" {
 				t.Fatalf("child exit operation = %q, want empty (Blocked)", exit.Operation)
 			}
-			if !strings.Contains(exit.Blocked, "gentle-ai review mode disable --scope clone --cwd <repo>") {
+			if !strings.Contains(exit.Blocked, "gentle-ai review mode disable --scope clone --cwd .") {
 				t.Fatalf("exit.Blocked does not name runnable disable exit: %q", exit.Blocked)
 			}
 			foundBlocked = true
