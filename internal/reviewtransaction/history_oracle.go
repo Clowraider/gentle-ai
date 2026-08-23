@@ -147,7 +147,7 @@ func canonicalSearchKey(used uint16, models map[string]historyModel) string {
 	fmt.Fprintf(&b, "%d", used)
 	for _, lineage := range lineages {
 		m := models[lineage]
-		fmt.Fprintf(&b, "|%s:%s:%s:%s:%s", lineage, m.authority, m.effect, m.revision, m.idempotencyID)
+		fmt.Fprintf(&b, "|%q:%q:%q:%q:%q", lineage, m.authority, m.effect, m.revision, m.idempotencyID)
 	}
 	return b.String()
 }
