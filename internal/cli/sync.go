@@ -543,6 +543,9 @@ func (r *syncRuntime) stagePlan() pipeline.StagePlan {
 			appVersion:  AppVersion,
 		},
 	}
+	if containsAgent(r.agentIDs, model.AgentOpenCode) && r.selection.HasComponent(model.ComponentSDD) {
+		prepare = append(prepare, managedBundlePrepareStep{homeDir: r.homeDir, state: r.state})
+	}
 
 	apply := []pipeline.Step{
 		rollbackRestoreStep{id: "apply:rollback-restore", state: r.state, homeDir: r.homeDir, workspaceDir: r.workspaceDir},
@@ -1582,10 +1585,6 @@ func runSyncWithSelection(homeDir string, selection model.Selection, background 
 		return result, err
 	}
 	defer rt.state.cleanupCompatibilityTransaction()
-	bundleTransaction, err := prepareManagedBundleTransaction(homeDir, ScopeGlobal, selection.Agents)
-	if err != nil {
-		return result, fmt.Errorf("prepare managed bundle transaction: %w", err)
-	}
 	rt.backgroundActivation = background.activationPlan
 	if rt.backgroundActivation != nil {
 		rt.runtimeReady = rt.backgroundActivation.Capability().Ready()
@@ -1652,8 +1651,8 @@ func runSyncWithSelection(homeDir string, selection model.Selection, background 
 		}
 		return result, verificationErr
 	}
-	if bundleTransaction != nil {
-		if err := bundleTransaction.VerifyAndCommit(AppVersion, ""); err != nil {
+	if rt.state.managedBundle != nil {
+		if err := rt.state.managedBundle.VerifyAndCommit(AppVersion, ""); err != nil {
 			commitErr := fmt.Errorf("commit managed bundle transaction: %w", err)
 			if rollback := orchestrator.Rollback(result.Execution); rollback.Err != nil {
 				commitErr = errors.Join(commitErr, rollback.Err)

@@ -206,10 +206,6 @@ func RunInstall(args []string, detection system.DetectionResult) (InstallResult,
 		return result, err
 	}
 	defer runtime.state.cleanupCompatibilityTransaction()
-	bundleTransaction, err := prepareManagedBundleTransaction(homeDir, input.Scope, resolved.Agents)
-	if err != nil {
-		return result, fmt.Errorf("prepare managed bundle transaction: %w", err)
-	}
 
 	// Print dependency warnings before the pipeline starts (CLI only).
 	// The TUI surfaces these on the complete screen instead.
@@ -259,8 +255,8 @@ func RunInstall(args []string, detection system.DetectionResult) (InstallResult,
 		}
 		return result, verificationErr
 	}
-	if bundleTransaction != nil {
-		if err := bundleTransaction.VerifyAndCommit(AppVersion, ""); err != nil {
+	if runtime.state.managedBundle != nil {
+		if err := runtime.state.managedBundle.VerifyAndCommit(AppVersion, ""); err != nil {
 			commitErr := fmt.Errorf("commit managed bundle transaction: %w", err)
 			if rollback := orchestrator.Rollback(result.Execution); rollback.Err != nil {
 				commitErr = errors.Join(commitErr, rollback.Err)
@@ -317,17 +313,6 @@ func RunInstall(args []string, detection system.DetectionResult) (InstallResult,
 	}
 
 	return result, nil
-}
-
-func prepareManagedBundleTransaction(homeDir string, scope InstallScope, agents []model.AgentID) (*managedbundle.Transaction, error) {
-	if scope != ScopeGlobal || !containsAgent(agents, model.AgentOpenCode) {
-		return nil, nil
-	}
-	catalog, err := managedbundle.Catalog()
-	if err != nil {
-		return nil, err
-	}
-	return managedbundle.Prepare(homeDir, catalog)
 }
 
 func persistInstallState(homeDir string, newState state.InstallState, agentIDs []string, flags InstallFlags, writer string) error {
@@ -685,6 +670,7 @@ type runtimeState struct {
 	rollbackSnapshotDir      string
 	piCodeGraph              *communitytool.PiCodeGraphResult
 	compatibilityTransaction compatibilityRefreshTransaction
+	managedBundle            *managedbundle.Transaction
 
 	// engramVersionResolved, engramVersion, and engramVersionErr cache the
 	// single `engram version` invocation performed by componentApplyStep.Run
@@ -770,6 +756,9 @@ func (r *installRuntime) stagePlan() pipeline.StagePlan {
 			appVersion:  AppVersion,
 		},
 	}
+	if r.scope == ScopeGlobal && containsAgent(r.resolved.Agents, model.AgentOpenCode) && containsComponent(r.resolved.OrderedComponents, model.ComponentSDD) {
+		prepare = append(prepare, managedBundlePrepareStep{homeDir: r.homeDir, state: r.state})
+	}
 
 	apply := make([]pipeline.Step, 0, len(r.resolved.Agents)+len(r.selection.CommunityTools)+len(r.resolved.OrderedComponents)+1)
 	apply = append(apply, rollbackRestoreStep{id: "apply:rollback-restore", state: r.state, homeDir: r.homeDir, workspaceDir: r.workspaceDir})
@@ -854,6 +843,31 @@ func (r *installRuntime) stagePlan() pipeline.StagePlan {
 	}
 
 	return pipeline.StagePlan{Prepare: prepare, Apply: apply}
+}
+
+type managedBundlePrepareStep struct {
+	homeDir string
+	state   *runtimeState
+}
+
+func (step managedBundlePrepareStep) ID() string { return "prepare:managed-bundle" }
+
+func (step managedBundlePrepareStep) Run() error {
+	catalog, err := managedbundle.Catalog()
+	if err != nil {
+		return err
+	}
+	step.state.managedBundle, err = managedbundle.Prepare(step.homeDir, catalog)
+	return err
+}
+
+func containsComponent(components []model.ComponentID, target model.ComponentID) bool {
+	for _, component := range components {
+		if component == target {
+			return true
+		}
+	}
+	return false
 }
 
 // legacyTriggerRulesSection is the retired managed section that used to carry
