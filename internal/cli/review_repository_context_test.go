@@ -433,6 +433,25 @@ func TestNegotiatedStatusAcceptsCorrectionSubsetDigest(t *testing.T) {
 		!slices.Equal(status.Projection.Paths, []string{"corrected.go", "untouched.go"}) {
 		t.Fatalf("subset request/projection = %#v / %#v", status.ValidationRequest, status.Projection)
 	}
+
+	writeReviewStartCandidate(t, repo, "corrected.go", "package candidate\n\nfunc correctedSubset() int { return 0 }\n", 0o644)
+	if err := os.Chtimes(filepath.Join(repo, "corrected.go"), fixed.Add(time.Second), fixed.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	if err := RunReview([]string{
+		"status", "--cwd", repo, "--contract", ReviewIntegrationContractV2,
+		"--lineage", started.LineageID, "--next-transition",
+	}, &output); err != nil {
+		t.Fatalf("status rejected a correction path restored exactly to base: %v\n%s", err, output.String())
+	}
+	status = ReviewTargetStatusResult{}
+	decodeStrictReviewJSON(t, output.Bytes(), &status)
+	if status.ValidationRequest == nil ||
+		!slices.Equal(status.ValidationRequest.CorrectionPaths, []string{"corrected.go"}) ||
+		!slices.Equal(status.Projection.Paths, []string{"untouched.go"}) {
+		t.Fatalf("base-equivalent request/projection = %#v / %#v", status.ValidationRequest, status.Projection)
+	}
 }
 
 func TestNegotiatedStartPublishesStableOpaqueRepositoryContext(t *testing.T) {
@@ -447,10 +466,16 @@ func TestNegotiatedStartPublishesStableOpaqueRepositoryContext(t *testing.T) {
 	}
 	var started ReviewIntegrationStartResult
 	decodeStrictReviewJSON(t, first.Bytes(), &started)
+	startSchema := compileWholePublishedReviewSchema(t, "v2", "start.schema.json")
+	validatePublishedReviewSchema(t, startSchema, first.Bytes())
 	if started.RepositoryContext == nil || started.RepositoryContext.Capability != reviewtransaction.ReviewRepositoryContextCapability ||
-		started.RepositoryContext.Handle == "" || !validReviewCapabilitySHA256(started.RepositoryContext.Revision) ||
-		!validReviewCapabilitySHA256(started.RepositoryContext.EventID) || started.RepositoryContext.Outcome != reviewtransaction.CompactRepositoryContextApplied {
+		started.RepositoryContext.Handle == "" || !validReviewCapabilitySHA256(started.RepositoryContext.Revision) {
 		t.Fatalf("repository context = %#v", started.RepositoryContext)
+	}
+	// The published v3 START schema makes the operation-event pair optional;
+	// atomic START has no receipt or recovery event to synthesize.
+	if started.RepositoryContext.EventID != "" || started.RepositoryContext.Outcome != "" {
+		t.Fatalf("atomic START synthesized repository-context event data = %#v", started.RepositoryContext)
 	}
 	if bytes.Contains(first.Bytes(), []byte(repo)) || bytes.Contains(first.Bytes(), []byte(filepath.Join(repo, ".git"))) {
 		t.Fatalf("negotiated START leaked a repository path: %s", first.String())
@@ -468,9 +493,9 @@ func TestNegotiatedStartPublishesStableOpaqueRepositoryContext(t *testing.T) {
 	}
 	var retry ReviewIntegrationStartResult
 	decodeStrictReviewJSON(t, resumed.Bytes(), &retry)
-	if retry.Action != string(reviewtransaction.CompactStartResumed) || retry.RepositoryContext == nil ||
+	if retry.Action != "replayed" || retry.RepositoryContext == nil ||
 		retry.RepositoryContext.Handle != started.RepositoryContext.Handle || retry.RepositoryContext.Revision != started.RepositoryContext.Revision {
-		t.Fatalf("resumed repository context = %#v", retry)
+		t.Fatalf("replayed repository context = %#v", retry)
 	}
 	var statusOutput bytes.Buffer
 	if err := RunReviewStatus([]string{"--cwd", repo, "--contract", ReviewIntegrationContractV2, "--lineage", started.LineageID, "--next-transition"}, &statusOutput); err != nil {
@@ -478,9 +503,11 @@ func TestNegotiatedStartPublishesStableOpaqueRepositoryContext(t *testing.T) {
 	}
 	var status ReviewTargetStatusResult
 	decodeStrictReviewJSON(t, statusOutput.Bytes(), &status)
-	if status.RepositoryContext == nil || status.RepositoryContext.Handle != started.RepositoryContext.Handle ||
-		status.RepositoryContext.EventID != started.RepositoryContext.EventID || status.RepositoryContext.Outcome != reviewtransaction.CompactRepositoryContextApplied {
+	if status.RepositoryContext == nil || status.RepositoryContext.Handle != started.RepositoryContext.Handle {
 		t.Fatalf("status repository context = %#v", status.RepositoryContext)
+	}
+	if status.RepositoryContext.EventID != "" || status.RepositoryContext.Outcome != "" {
+		t.Fatalf("atomic START STATUS synthesized repository-context event data = %#v", status.RepositoryContext)
 	}
 	wrongRevision := status
 	wrongRevisionContext := *status.RepositoryContext
