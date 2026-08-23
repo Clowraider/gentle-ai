@@ -85,7 +85,7 @@ func TestUninstall_ErrorScenarios(t *testing.T) {
 		assertion func(t *testing.T, ctx uninstallCtx)
 	}{
 		{
-			name: "save registry failure preserves files and registry entry",
+			name: "save registry failure preserves registry entry on disk while files removed",
 			setup: func(t *testing.T, home string) uninstallCtx {
 				return uninstallCtx{
 					registryPath: writeRegistryForUninstall(t, home, entry("save-failure-agent", model.AgentClaudeCode, model.AgentOpenCode)),
@@ -96,9 +96,9 @@ func TestUninstall_ErrorScenarios(t *testing.T) {
 			stubSave: func(string, *Registry) error { return fmt.Errorf("boom") },
 			wantErr:  "uninstall: save registry: boom",
 			assertion: func(t *testing.T, ctx uninstallCtx) {
-				assertPathSets(t, ctx.paths, true, "owned")
+				assertPathSets(t, ctx.paths, false, "owned")
 				if loadRegistryForTest(t, ctx.registryPath).FindByName(ctx.lookupName) == nil {
-					t.Fatal("expected registry entry to remain after save failure")
+					t.Fatal("expected registry entry to remain on disk after save failure")
 				}
 			},
 		},
@@ -155,7 +155,7 @@ func TestUninstall_ErrorScenarios(t *testing.T) {
 			},
 		},
 		{
-			name: "file removal failure restores registry entry",
+			name: "file removal failure preserves registry entry",
 			setup: func(t *testing.T, home string) uninstallCtx {
 				skillsDir := supportedSkillsDirs(home)[model.AgentOpenCode]
 				skillDir := filepath.Join(skillsDir, "blocked-agent")
@@ -173,7 +173,7 @@ func TestUninstall_ErrorScenarios(t *testing.T) {
 			assertion: func(t *testing.T, ctx uninstallCtx) {
 				reg := loadRegistryForTest(t, ctx.registryPath)
 				if reg.FindByName(ctx.lookupName) == nil {
-					t.Fatal("expected registry entry to be restored after file removal failure")
+					t.Fatal("expected registry entry to remain untouched after file removal failure")
 				}
 			},
 		},
@@ -220,7 +220,7 @@ func TestUninstall_ErrorScenarios(t *testing.T) {
 			} else if err.Error() != tt.wantErr {
 				t.Fatalf("expected error %q, got %v", tt.wantErr, err)
 			}
-			if len(result.RemovedPaths) != 0 {
+			if tt.name != "save registry failure preserves registry entry on disk while files removed" && len(result.RemovedPaths) != 0 {
 				t.Fatalf("RemovedPaths = %v, want empty", result.RemovedPaths)
 			}
 			assertAgentIDs(t, result.SkippedAgents, nil)
@@ -340,5 +340,46 @@ func writeSkillFile(t *testing.T, path, body string) {
 	}
 	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
 		t.Fatalf("WriteFile %s: %v", path, err)
+	}
+}
+
+func TestUninstall_SymlinkedSkillDirDoesNotDeleteOutsideTarget(t *testing.T) {
+	home := t.TempDir()
+	outside := filepath.Join(home, "outside")
+	outsideSkill := filepath.Join(outside, "SKILL.md")
+	writeSkillFile(t, outsideSkill, "# Outside Skill\n")
+
+	skillsDir := supportedSkillsDirs(home)[model.AgentOpenCode]
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatalf("MkdirAll skillsDir: %v", err)
+	}
+	skillLink := filepath.Join(skillsDir, "symlink-agent")
+	if err := os.Symlink(outside, skillLink); err != nil {
+		t.Fatalf("Symlink %s -> %s: %v", skillLink, outside, err)
+	}
+
+	regPath := writeRegistryForUninstall(t, home, entry("symlink-agent", model.AgentOpenCode))
+	result, err := Uninstall(regPath, "symlink-agent", home)
+	assertUninstallOK(t, err)
+
+	data, err := os.ReadFile(outsideSkill)
+	if err != nil {
+		t.Fatalf("expected outside SKILL.md to remain intact, got err = %v", err)
+	}
+	if string(data) != "# Outside Skill\n" {
+		t.Fatalf("outside SKILL.md content altered: %q", string(data))
+	}
+
+	if _, err := os.Lstat(skillLink); !os.IsNotExist(err) {
+		t.Fatalf("expected symlink %s to be removed, got err = %v", skillLink, err)
+	}
+
+	reg := loadRegistryForTest(t, regPath)
+	if reg.FindByName("symlink-agent") != nil {
+		t.Fatal("expected registry entry removed")
+	}
+
+	if len(result.RemovedPaths) != 1 || result.RemovedPaths[0] != skillLink {
+		t.Fatalf("RemovedPaths = %v, want [%s]", result.RemovedPaths, skillLink)
 	}
 }
