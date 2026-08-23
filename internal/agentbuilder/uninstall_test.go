@@ -33,6 +33,7 @@ func TestUninstall_SuccessScenarios(t *testing.T) {
 		{"removes owned skill files for installed agents", "css-a11y-reviewer", []RegistryEntry{entry("css-a11y-reviewer", model.AgentClaudeCode, model.AgentOpenCode, model.AgentGeminiCLI, model.AgentCodex)}, map[string][]model.AgentID{"owned": {model.AgentClaudeCode, model.AgentOpenCode, model.AgentGeminiCLI, model.AgentCodex}}, nil, []string{"owned"}, nil, nil, nil, nil},
 		{"uses persisted registry name exactly", "reviewer-custom", []RegistryEntry{entry("reviewer-custom", model.AgentOpenCode)}, map[string][]model.AgentID{"owned": {model.AgentOpenCode}, "other": {model.AgentOpenCode}}, nil, []string{"owned"}, []string{"other"}, nil, nil, nil},
 		{"removes registry entry after success", "remove-me", []RegistryEntry{entry("remove-me", model.AgentClaudeCode), entry("keep-me", model.AgentOpenCode)}, map[string][]model.AgentID{"owned": {model.AgentClaudeCode}}, nil, nil, nil, nil, []string{"remove-me"}, []string{"keep-me"}},
+		{"removes first agent when multiple exist without mutating pointer", "first-agent", []RegistryEntry{entry("first-agent", model.AgentClaudeCode), entry("other-agent", model.AgentOpenCode)}, map[string][]model.AgentID{"owned": {model.AgentClaudeCode}, "other-agent": {model.AgentOpenCode}}, nil, []string{"owned"}, []string{"other-agent"}, nil, []string{"first-agent"}, []string{"other-agent"}},
 		{"missing owned file does not fail", "missing-file-agent", []RegistryEntry{entry("missing-file-agent", model.AgentClaudeCode)}, nil, nil, nil, nil, nil, nil, nil},
 		{"unknown installed agent is skipped safely", "unknown-agent-reviewer", []RegistryEntry{entry("unknown-agent-reviewer", model.AgentClaudeCode, model.AgentID("unknown-agent"))}, map[string][]model.AgentID{"owned": {model.AgentClaudeCode}}, nil, []string{"owned"}, nil, []model.AgentID{model.AgentID("unknown-agent")}, nil, nil},
 		{"does not delete parent or shared directories", "agent-a", []RegistryEntry{entry("agent-a", model.AgentOpenCode)}, map[string][]model.AgentID{"owned": {model.AgentOpenCode}, "shared": {model.AgentOpenCode}}, func(ctx *uninstallCtx) {
@@ -179,6 +180,9 @@ func entry(name string, agents ...model.AgentID) RegistryEntry {
 func ownedName(key, lookup string) string {
 	if key == "other" {
 		return "reviewer"
+	}
+	if key == "other-agent" {
+		return "other-agent"
 	}
 	if key == "shared" {
 		return "agent-b"
