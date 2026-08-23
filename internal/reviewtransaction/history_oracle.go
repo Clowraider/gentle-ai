@@ -3,6 +3,8 @@ package reviewtransaction
 import (
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 )
 
 const (
@@ -57,6 +59,23 @@ type HistoryEvent struct {
 	AfterAuthority   HistoryAuthority
 	BeforeEffect     HistoryEffect
 	AfterEffect      HistoryEffect
+}
+
+type HistorySchedule struct {
+	Name               string
+	Actors             int
+	Operations         int
+	SchedulerDecisions int
+	Faults             int
+	Restarts           int
+}
+
+var CanonicalHistorySchedules = []HistorySchedule{
+	{Name: "concurrent-start", Actors: 3, Operations: 3, SchedulerDecisions: 8},
+	{Name: "concurrent-finalize", Actors: 3, Operations: 3, SchedulerDecisions: 12},
+	{Name: "validate-during-finalize", Actors: 3, Operations: 4, SchedulerDecisions: 16},
+	{Name: "restart-before-effect", Actors: 2, Operations: 4, SchedulerDecisions: 16, Faults: 1, Restarts: 1},
+	{Name: "concurrent-reconcile", Actors: 3, Operations: 3, SchedulerDecisions: 12},
 }
 
 type historyModel struct {
@@ -150,11 +169,16 @@ func CheckHistory(events []HistoryEvent) ([]HistoryEvent, error) {
 		}
 	}
 	states, order := 0, make([]HistoryEvent, 0, len(events))
+	failed := map[string]struct{}{}
 	var search func(uint16, map[string]historyModel) bool
 	search = func(used uint16, models map[string]historyModel) bool {
 		states++
 		if states > MaxOracleSearchStates || len(order) == len(events) {
 			return len(order) == len(events)
+		}
+		key := historySearchKey(used, models)
+		if _, seen := failed[key]; seen {
+			return false
 		}
 		for index, event := range events {
 			bit := uint16(1 << index)
@@ -180,6 +204,7 @@ func CheckHistory(events []HistoryEvent) ([]HistoryEvent, error) {
 			}
 			order = order[:len(order)-1]
 		}
+		failed[key] = struct{}{}
 		return false
 	}
 	if search(0, map[string]historyModel{}) {
@@ -189,4 +214,55 @@ func CheckHistory(events []HistoryEvent) ([]HistoryEvent, error) {
 		return nil, ErrOracleSearchBound
 	}
 	return nil, errors.New("review history has no legal real-time-compatible serialization")
+}
+
+func historySearchKey(used uint16, models map[string]historyModel) string {
+	lineages := make([]string, 0, len(models))
+	for lineage := range models {
+		lineages = append(lineages, lineage)
+	}
+	sort.Strings(lineages)
+	var key strings.Builder
+	fmt.Fprintf(&key, "%x", used)
+	for _, lineage := range lineages {
+		model := models[lineage]
+		fmt.Fprintf(&key, "|%s:%s:%s:%s:%s", lineage, model.authority, model.effect, model.revision, model.idempotencyID)
+	}
+	return key.String()
+}
+
+type HistoryLivenessBounds struct {
+	MaxTransitions int
+	MaxCASAttempts int
+}
+
+func CheckHistoryLiveness(events []HistoryEvent, bounds HistoryLivenessBounds) error {
+	if bounds.MaxTransitions < 1 || bounds.MaxCASAttempts < 1 {
+		return errors.New("history liveness bounds must be positive")
+	}
+	transitions := map[string]int{}
+	casAttempts := map[string]int{}
+	terminal := map[string]bool{}
+	for _, event := range events {
+		if event.Operation == HistoryStart || event.Operation == HistoryFinalize || event.Operation == HistoryReconcile {
+			transitions[event.LineageID]++
+			if transitions[event.LineageID] > bounds.MaxTransitions {
+				return fmt.Errorf("lineage %q exceeded transition budget", event.LineageID)
+			}
+		}
+		if event.Result == "stale_cas" || event.Result == "contention" {
+			key := event.LineageID + "\x00" + event.Actor
+			casAttempts[key]++
+			if casAttempts[key] > bounds.MaxCASAttempts {
+				return fmt.Errorf("actor %q exceeded CAS budget", event.Actor)
+			}
+		}
+		terminal[event.LineageID] = terminal[event.LineageID] || event.AfterAuthority == HistoryApproved && event.AfterEffect == HistoryEffectApplied || event.Result == "manual"
+	}
+	for lineage, count := range transitions {
+		if count > 0 && !terminal[lineage] {
+			return fmt.Errorf("lineage %q did not reach a usable outcome", lineage)
+		}
+	}
+	return nil
 }

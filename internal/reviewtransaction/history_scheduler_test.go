@@ -89,6 +89,31 @@ func TestHistorySchedulerReachesReadOnlyAndReconcileProductionPaths(t *testing.T
 	}
 }
 
+func TestAtomicStartFaultAfterCommitReplaysAfterFreshProcessBoundary(t *testing.T) {
+	repo := initSnapshotRepo(t)
+	request := compactAtomicStartFixture(t, repo, "scheduler-restart")
+	store, err := CompactAuthoritativeStore(context.Background(), repo, request.State.LineageID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fault := &recordingHistoryScheduler{fail: HistoryAfterCommit}
+	if _, err := store.CreateOrReplayAtomicStart(WithHistoryScheduler(context.Background(), fault), request); !errors.Is(err, errHistoryBoundary) {
+		t.Fatalf("faulted START error = %v", err)
+	}
+
+	restarted, err := CompactAuthoritativeStore(context.Background(), repo, request.State.LineageID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := restarted.CreateOrReplayAtomicStart(context.Background(), request)
+	if err != nil {
+		t.Fatalf("fresh-process replay error = %v", err)
+	}
+	if !replayed.Replayed || replayed.Record.Revision == "" {
+		t.Fatalf("fresh-process replay = %#v", replayed)
+	}
+}
+
 func assertHistoryPoints(t *testing.T, got []HistoryPoint, want ...HistoryPoint) {
 	t.Helper()
 	for _, expected := range want {
