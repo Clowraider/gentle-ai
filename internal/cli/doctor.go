@@ -15,6 +15,7 @@ import (
 
 	"github.com/gentleman-programming/gentle-ai/v2/internal/components/engram"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/doctor"
+	"github.com/gentleman-programming/gentle-ai/v2/internal/managedbundle"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/state"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/storage"
 )
@@ -641,6 +642,35 @@ func statusIcon(s CheckStatus) string {
 }
 
 func checkInstalledAssetVersion(homeDir string) CheckResult {
+	catalog, catalogErr := managedbundle.Catalog()
+	if catalogErr == nil {
+		return checkInstalledAssetVersionWithCatalog(homeDir, catalog)
+	}
+	return checkInstalledAssetVersionLegacy(homeDir)
+}
+
+func checkInstalledAssetVersionWithCatalog(homeDir string, catalog []managedbundle.Descriptor) CheckResult {
+	classification := managedbundle.ClassifyExtents(homeDir, AppVersion, "", catalog)
+	if classification.BundleIdentity != managedbundle.BundleUnknown || classification.RecoveryState != "" {
+		status := CheckStatusWarn
+		if classification.BundleIdentity == managedbundle.BundleAligned && (classification.RecoveryState == "" || classification.RecoveryState == managedbundle.RecoveryNone) {
+			status = CheckStatusPass
+		}
+		result := CheckResult{Status: status, Detail: classification.Detail}
+		if classification.SyncEligible {
+			result.Remedy = doctor.NewRemedy(doctor.RemedySync, "Run `gentle-ai sync` after reviewing the managed bundle evidence")
+		}
+		return result
+	}
+	if _, err := os.Stat(managedbundle.ManifestPath(homeDir)); err == nil || !errors.Is(err, os.ErrNotExist) {
+		return CheckResult{Status: CheckStatusWarn, Detail: classification.Detail}
+	}
+	return checkInstalledAssetVersionLegacy(homeDir)
+}
+
+func checkInstalledAssetVersionLegacy(homeDir string) CheckResult {
+	// Legacy state remains an advisory compatibility fallback. It cannot prove
+	// observed disk integrity, so a version match is intentionally not a pass.
 	s, err := state.Read(homeDir)
 	if err != nil {
 		return CheckResult{
@@ -661,7 +691,7 @@ func checkInstalledAssetVersion(homeDir string) CheckResult {
 		}
 	}
 	return CheckResult{
-		Status: CheckStatusPass,
-		Detail: fmt.Sprintf("installed assets match running binary version (%s)", AppVersion),
+		Status: CheckStatusWarn,
+		Detail: fmt.Sprintf("legacy state records running binary version %s, but no managed bundle manifest exists; observed asset integrity is unknown", AppVersion),
 	}
 }

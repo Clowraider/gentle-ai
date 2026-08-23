@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -10,12 +12,14 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gentleman-programming/gentle-ai/v2/internal/components/engram"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/doctor"
+	"github.com/gentleman-programming/gentle-ai/v2/internal/managedbundle"
 )
 
 // --- checkOneTool ---
@@ -372,7 +376,7 @@ func TestCheckStateJSON_OK(t *testing.T) {
 	}
 }
 
-func TestCheckInstalledAssetVersion_MatchingPass(t *testing.T) {
+func TestCheckInstalledAssetVersion_LegacyMatchIsUnknown(t *testing.T) {
 	homeDir := t.TempDir()
 	stateDir := filepath.Join(homeDir, ".gentle-ai")
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
@@ -384,8 +388,8 @@ func TestCheckInstalledAssetVersion_MatchingPass(t *testing.T) {
 	}
 
 	got := checkInstalledAssetVersion(homeDir)
-	if got.Status != CheckStatusPass {
-		t.Errorf("expected pass, got %s: %s", got.Status, got.Detail)
+	if got.Status != CheckStatusWarn || !strings.Contains(got.Detail, "integrity is unknown") {
+		t.Errorf("expected unknown warning, got %s: %s", got.Status, got.Detail)
 	}
 }
 
@@ -407,6 +411,89 @@ func TestCheckInstalledAssetVersion_SkewWarning(t *testing.T) {
 	if !strings.Contains(got.Detail, "v0.9.0") || !strings.Contains(got.Detail, "gentle-ai sync") {
 		t.Errorf("unexpected detail: %s", got.Detail)
 	}
+}
+
+func TestCheckInstalledAssetVersion_ProjectsManagedBundle(t *testing.T) {
+	descriptor := managedbundle.Descriptor{ResourceID: managedbundle.ArchiveSkillResourceID, CanonicalPath: managedbundle.ArchiveSkillTargetPath, Ownership: managedbundle.OwnershipFullFile, Content: []byte("desired"), Mode: 0o644}
+	digest, err := managedbundle.Digest([]managedbundle.Descriptor{descriptor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name, version, content string
+		wantStatus             CheckStatus
+		wantRemedy             bool
+	}{
+		{name: "aligned", version: AppVersion, content: "desired", wantStatus: CheckStatusPass},
+		{name: "stale", version: "older", content: "desired", wantStatus: CheckStatusWarn, wantRemedy: true},
+		{name: "modified", version: AppVersion, content: "foreign", wantStatus: CheckStatusWarn},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			target := managedbundle.ResolveTarget(home, descriptor)
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(target, []byte(tt.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			manifest := managedbundle.Manifest{Schema: managedbundle.ManifestSchemaV1, Generation: 1, TransactionID: "tx-1", Producer: managedbundle.Producer{Version: tt.version, CatalogDigest: digest}, Resources: []managedbundle.Resource{{ResourceID: descriptor.ResourceID, CanonicalPath: descriptor.CanonicalPath, Ownership: descriptor.Ownership, DesiredSHA256: managedbundle.SHA256(descriptor.Content), ObservedSHA256: managedbundle.SHA256(descriptor.Content), Mode: descriptor.Mode}}}
+			data, err := managedbundle.MarshalManifest(manifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Dir(managedbundle.ManifestPath(home)), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(managedbundle.ManifestPath(home), data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			before, err := snapshotDoctorTree(home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := checkInstalledAssetVersionWithCatalog(home, []managedbundle.Descriptor{descriptor})
+			if got.Status != tt.wantStatus || (got.Remedy != nil) != tt.wantRemedy {
+				t.Fatalf("result = %#v", got)
+			}
+			after, err := snapshotDoctorTree(home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if before != after {
+				t.Fatalf("doctor mutated HOME:\nbefore %s\nafter  %s", before, after)
+			}
+		})
+	}
+}
+
+func snapshotDoctorTree(root string) (string, error) {
+	var entries []string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			entries = append(entries, relative+"/")
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		entries = append(entries, fmt.Sprintf("%s:%o:%s", relative, info.Mode().Perm(), managedbundle.SHA256(content)))
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	sort.Strings(entries)
+	digest := sha256.Sum256([]byte(strings.Join(entries, "\n")))
+	return hex.EncodeToString(digest[:]), nil
 }
 
 // --- checkEngramReachable ---
