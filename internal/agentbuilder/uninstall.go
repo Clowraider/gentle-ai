@@ -45,6 +45,9 @@ func Uninstall(registryPath, agentName, homeDir string) (UninstallResult, error)
 	}
 
 	targetName := entry.Name
+	if err := validateTargetName(targetName); err != nil {
+		return UninstallResult{}, fmt.Errorf("uninstall: invalid registry entry name %q: %w", targetName, err)
+	}
 	installedAgents := append([]model.AgentID(nil), entry.InstalledAgents...)
 
 	result := UninstallResult{}
@@ -80,21 +83,28 @@ func Uninstall(registryPath, agentName, homeDir string) (UninstallResult, error)
 	return result, nil
 }
 
-func uninstallSkillDir(skillsDir, entryName string) (string, error) {
+func validateTargetName(entryName string) error {
 	if entryName == "" {
-		return "", fmt.Errorf("name must not be empty")
+		return fmt.Errorf("name must not be empty")
 	}
 	if filepath.IsAbs(entryName) {
-		return "", fmt.Errorf("absolute paths are not allowed")
+		return fmt.Errorf("absolute paths are not allowed")
 	}
 	if entryName != filepath.Base(entryName) {
-		return "", fmt.Errorf("path separators are not allowed")
+		return fmt.Errorf("path separators are not allowed")
 	}
 	if entryName == "." || entryName == ".." {
-		return "", fmt.Errorf("dot path segments are not allowed")
+		return fmt.Errorf("dot path segments are not allowed")
 	}
 	if strings.ContainsAny(entryName, `/\\`) {
-		return "", fmt.Errorf("path separators are not allowed")
+		return fmt.Errorf("path separators are not allowed")
+	}
+	return nil
+}
+
+func uninstallSkillDir(skillsDir, entryName string) (string, error) {
+	if err := validateTargetName(entryName); err != nil {
+		return "", err
 	}
 
 	skillDir := filepath.Join(skillsDir, entryName)

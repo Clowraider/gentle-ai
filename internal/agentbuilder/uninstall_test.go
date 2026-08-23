@@ -117,11 +117,40 @@ func TestUninstall_ErrorScenarios(t *testing.T) {
 			assertion: func(t *testing.T, ctx uninstallCtx) {
 				assertPathSets(t, ctx.paths, true, "outside")
 				reg := loadRegistryForTest(t, ctx.registryPath)
-				if reg.FindByName(ctx.lookupName) != nil {
-					t.Fatal("expected malicious registry entry removed")
+				if reg.FindByName(ctx.lookupName) == nil {
+					t.Fatal("expected registry entry unmutated when validation fails")
 				}
-				if reg.FindByName("escaped-target") != nil {
-					t.Fatal("expected no sibling entry created")
+			},
+		},
+		{
+			name: "path traversal name with empty installed agents is rejected",
+			setup: func(t *testing.T, home string) uninstallCtx {
+				return uninstallCtx{
+					registryPath: writeRegistryForUninstall(t, home, entry("../escaped-target")),
+					lookupName:   "../escaped-target",
+				}
+			},
+			wantErr: "uninstall: invalid registry entry name ",
+			assertion: func(t *testing.T, ctx uninstallCtx) {
+				reg := loadRegistryForTest(t, ctx.registryPath)
+				if reg.FindByName(ctx.lookupName) == nil {
+					t.Fatal("expected registry entry unmutated when validation fails")
+				}
+			},
+		},
+		{
+			name: "path traversal name with unsupported installed agents is rejected",
+			setup: func(t *testing.T, home string) uninstallCtx {
+				return uninstallCtx{
+					registryPath: writeRegistryForUninstall(t, home, entry("../escaped-target", model.AgentID("unsupported-agent"))),
+					lookupName:   "../escaped-target",
+				}
+			},
+			wantErr: "uninstall: invalid registry entry name ",
+			assertion: func(t *testing.T, ctx uninstallCtx) {
+				reg := loadRegistryForTest(t, ctx.registryPath)
+				if reg.FindByName(ctx.lookupName) == nil {
+					t.Fatal("expected registry entry unmutated when validation fails")
 				}
 			},
 		},
@@ -140,6 +169,10 @@ func TestUninstall_ErrorScenarios(t *testing.T) {
 			wantErr: "uninstall: invalid registry entry name ",
 			assertion: func(t *testing.T, ctx uninstallCtx) {
 				assertPathSets(t, ctx.paths, true, "outside")
+				reg := loadRegistryForTest(t, ctx.registryPath)
+				if reg.FindByName(ctx.lookupName) == nil {
+					t.Fatal("expected registry entry unmutated when validation fails")
+				}
 			},
 		},
 	}
