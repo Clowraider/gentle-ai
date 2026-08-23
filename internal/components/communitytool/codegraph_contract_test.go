@@ -64,6 +64,7 @@ func TestCodeGraphCompatibilityStrategies(t *testing.T) {
 }
 
 func TestExcludedAgentsNeverEnterCodeGraphSurfaces(t *testing.T) {
+	t.Setenv("COPILOT_HOME", filepath.Join(t.TempDir(), ".copilot"))
 	reg, err := agents.NewDefaultRegistry()
 	if err != nil {
 		t.Fatal(err)
