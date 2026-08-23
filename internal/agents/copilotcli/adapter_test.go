@@ -13,57 +13,50 @@ import (
 )
 
 func TestCopilotCLIAdapter_Detect(t *testing.T) {
-	t.Setenv("COPILOT_HOME", "")
-	t.Run("found", func(t *testing.T) {
-		a := &Adapter{
-			lookPath: func(string) (string, error) { return "/bin/copilot", nil },
-			statPath: func(string) statResult { return statResult{isDir: true} },
-		}
-		ins, bin, cfg, cfgFound, err := a.Detect(context.Background(), "/home/u")
-		if err != nil || !ins || bin != "/bin/copilot" || cfg != "/home/u/.copilot" || !cfgFound {
-			t.Errorf("got (%v, %q, %q, %v, %v)", ins, bin, cfg, cfgFound, err)
-		}
-	})
-
-	t.Run("missing", func(t *testing.T) {
-		a := &Adapter{
-			lookPath: func(string) (string, error) { return "", exec.ErrNotFound },
-			statPath: func(string) statResult { return statResult{err: os.ErrNotExist} },
-		}
-		ins, bin, cfg, cfgFound, err := a.Detect(context.Background(), "/home/u")
-		if err != nil || ins || bin != "" || cfg != "/home/u/.copilot" || cfgFound {
-			t.Errorf("got (%v, %q, %q, %v, %v)", ins, bin, cfg, cfgFound, err)
-		}
-	})
-
-	t.Run("err", func(t *testing.T) {
-		boom := errors.New("boom")
-		a := &Adapter{
-			lookPath: func(string) (string, error) { return "/bin/copilot", nil },
-			statPath: func(string) statResult { return statResult{err: boom} },
-		}
-		if _, _, _, _, err := a.Detect(context.Background(), "/home/u"); !errors.Is(err, boom) {
-			t.Errorf("got %v, want %v", err, boom)
-		}
-	})
-}
-
-func TestCopilotCLIAdapter_DetectUsesCopilotHome(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "custom-copilot")
-	t.Setenv("COPILOT_HOME", root)
-	a := &Adapter{
-		lookPath: func(string) (string, error) { return "/bin/copilot", nil },
-		statPath: func(path string) statResult {
-			if path != root {
-				t.Fatalf("stat path = %q, want %q", path, root)
-			}
-			return statResult{isDir: true}
-		},
+	boom := errors.New("boom")
+	tests := []struct {
+		name        string
+		copilotHome string
+		lookPath    func(string) (string, error)
+		statResult  statResult
+		wantIns     bool
+		wantBin     string
+		wantCfg     string
+		wantFound   bool
+		wantErr     error
+	}{
+		{"found", "", func(string) (string, error) { return "/bin/copilot", nil }, statResult{isDir: true}, true, "/bin/copilot", "/home/u/.copilot", true, nil},
+		{"missing", "", func(string) (string, error) { return "", exec.ErrNotFound }, statResult{err: os.ErrNotExist}, false, "", "/home/u/.copilot", false, nil},
+		{"stat error", "", func(string) (string, error) { return "/bin/copilot", nil }, statResult{err: boom}, false, "", "/home/u/.copilot", false, boom},
+		{"custom COPILOT_HOME", filepath.Join(t.TempDir(), "custom-copilot"), func(string) (string, error) { return "/bin/copilot", nil }, statResult{isDir: true}, true, "/bin/copilot", "", true, nil},
 	}
-
-	_, _, cfg, cfgFound, err := a.Detect(context.Background(), "/home/u")
-	if err != nil || cfg != root || !cfgFound {
-		t.Fatalf("Detect() config = %q, found = %v, err = %v", cfg, cfgFound, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("COPILOT_HOME", tt.copilotHome)
+			wantCfg := tt.wantCfg
+			if tt.copilotHome != "" {
+				wantCfg = tt.copilotHome
+			}
+			a := &Adapter{
+				lookPath: tt.lookPath,
+				statPath: func(path string) statResult {
+					if path != wantCfg {
+						t.Fatalf("stat path = %q, want %q", path, wantCfg)
+					}
+					return tt.statResult
+				},
+			}
+			ins, bin, cfg, found, err := a.Detect(context.Background(), "/home/u")
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Errorf("got %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || ins != tt.wantIns || bin != tt.wantBin || cfg != wantCfg || found != tt.wantFound {
+				t.Errorf("got (%v, %q, %q, %v, %v)", ins, bin, cfg, found, err)
+			}
+		})
 	}
 }
 

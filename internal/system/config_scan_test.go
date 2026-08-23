@@ -69,24 +69,24 @@ func TestScanConfigs_AgentFieldMatchesModelAgentID(t *testing.T) {
 
 	// These are the AgentID string values the TUI switch statements check.
 	knownAgents := map[string]bool{
-		"claude-code":        false,
-		"opencode":           false,
-		"kilocode":           false,
-		"gemini-cli":         false,
-		"cursor":             false,
-		"vscode-copilot":     false,
-		"codex":              false,
-		"antigravity":        false,
-		"windsurf":           false,
-		"kimi":               false,
-		"qwen-code":          false,
-		"kiro-ide":           false,
-		"openclaw":           false,
-		"pi":                 false,
-		"trae-ide":           false,
-		"hermes":             false,
-		"github-copilot-cli": false,
+		"claude-code":    false,
+		"opencode":       false,
+		"kilocode":       false,
+		"gemini-cli":     false,
+		"cursor":         false,
+		"vscode-copilot": false,
+		"codex":          false,
+		"antigravity":    false,
+		"windsurf":       false,
+		"kimi":           false,
+		"qwen-code":      false,
+		"kiro-ide":       false,
+		"openclaw":       false,
+		"pi":             false,
+		"trae-ide":       false,
+		"hermes":         false,
 	}
+	knownAgents["github-copilot-cli"] = false
 
 	for _, c := range configs {
 		if _, known := knownAgents[c.Agent]; known {
@@ -181,32 +181,18 @@ func TestScanConfigs_CopilotCLIAndVSCodeDoNotCollide(t *testing.T) {
 	}
 
 	configs := ScanConfigs(home)
-	cliFound, vscodeFound := false, false
-	for _, c := range configs {
-		if c.Agent == "github-copilot-cli" {
-			cliFound = true
-			if !c.Exists {
-				t.Errorf("github-copilot-cli Exists = false, want true")
-			}
-		}
-		if c.Agent == "vscode-copilot" {
-			vscodeFound = true
-			if c.Exists {
-				t.Errorf("vscode-copilot Exists = true, want false for copilot-chat")
-			}
-		}
+	if !configStateFor(t, configs, "github-copilot-cli").Exists {
+		t.Errorf("github-copilot-cli Exists = false, want true")
 	}
-	if !cliFound || !vscodeFound {
-		t.Errorf("missing entries: cli=%v, vscode=%v", cliFound, vscodeFound)
+	if configStateFor(t, configs, "vscode-copilot").Exists {
+		t.Errorf("vscode-copilot Exists = true, want false for copilot-chat")
 	}
 
 	if err := os.MkdirAll(filepath.Join(home, ".vscode", "extensions", "github.copilot-1.2.3"), 0o755); err != nil {
 		t.Fatalf("MkdirAll(github.copilot-1.2.3): %v", err)
 	}
-	for _, c := range ScanConfigs(home) {
-		if c.Agent == "vscode-copilot" && !c.Exists {
-			t.Errorf("vscode-copilot Exists = false, want true for github.copilot-1.2.3")
-		}
+	if !configStateFor(t, ScanConfigs(home), "vscode-copilot").Exists {
+		t.Errorf("vscode-copilot Exists = false, want true for github.copilot-1.2.3")
 	}
 }
 
@@ -217,16 +203,21 @@ func TestScanConfigs_UsesCopilotHome(t *testing.T) {
 		t.Fatalf("MkdirAll(COPILOT_HOME): %v", err)
 	}
 
-	for _, config := range ScanConfigs(t.TempDir()) {
-		if config.Agent != "github-copilot-cli" {
-			continue
-		}
-		if config.Path != root || !config.Exists || !config.IsDirectory {
-			t.Fatalf("github-copilot-cli = %+v, want path %q present directory", config, root)
-		}
-		return
+	config := configStateFor(t, ScanConfigs(t.TempDir()), "github-copilot-cli")
+	if config.Path != root || !config.Exists || !config.IsDirectory {
+		t.Fatalf("github-copilot-cli = %+v, want path %q present directory", config, root)
 	}
-	t.Fatal("ScanConfigs() missing github-copilot-cli entry")
+}
+
+func configStateFor(t *testing.T, configs []ConfigState, agent string) ConfigState {
+	t.Helper()
+	for _, config := range configs {
+		if config.Agent == agent {
+			return config
+		}
+	}
+	t.Fatalf("ScanConfigs() missing %s entry", agent)
+	return ConfigState{}
 }
 
 // agentNames extracts agent name strings for error messages.
