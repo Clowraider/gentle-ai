@@ -340,7 +340,7 @@ func RenderUninstallConfirm(mode model.UninstallMode, selected []model.AgentID, 
 	b.WriteString("\n")
 
 	// Workspace-scoped assets warning
-	hasEngramProjectAsset := engramScope == model.EngramUninstallScopeProject && engramProjectScopeAvailable && hasSelectedComponent(components, model.ComponentEngram)
+	hasEngramProjectAsset := engramScope == model.EngramUninstallScopeProject && engramProjectScopeAvailable
 	hasSDD := (mode == model.UninstallModeFull || mode == model.UninstallModeFullRemove) || hasSelectedComponent(components, model.ComponentSDD)
 	hasSkills := (mode == model.UninstallModeFull || mode == model.UninstallModeFullRemove) || hasSelectedComponent(components, model.ComponentSkills)
 

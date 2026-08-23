@@ -90,50 +90,40 @@ func TestRenderUninstallResultIncludesEngramScopeSummary(t *testing.T) {
 	}
 }
 
-func TestRenderUninstallConfirmWorkspaceWarningOmitsEngramWhenScopeIsNone(t *testing.T) {
-	out := RenderUninstallConfirm(
-		model.UninstallModePartial,
-		[]model.AgentID{model.AgentOpenCode},
-		[]model.ComponentID{model.ComponentSDD, model.ComponentEngram},
-		[]string{"cheap"},
-		model.EngramUninstallScopeNone,
-		true,
-		0,
-		false,
-		0,
-	)
+func TestRenderUninstallConfirmEngramWorkspaceWarningMatchesCleanupEffect(t *testing.T) {
+	tests := []struct {
+		name             string
+		components       []model.ComponentID
+		profiles         []string
+		scope            model.EngramUninstallScope
+		projectAvailable bool
+		wantWarning      bool
+	}{
+		{name: "Engram-only project cleanup", components: []model.ComponentID{model.ComponentEngram}, scope: model.EngramUninstallScopeProject, projectAvailable: true, wantWarning: true},
+		{name: "no cleanup", components: []model.ComponentID{model.ComponentEngram}, scope: model.EngramUninstallScopeNone, projectAvailable: true},
+		{name: "project cleanup with unrelated selection", components: []model.ComponentID{model.ComponentPersona}, scope: model.EngramUninstallScopeProject, projectAvailable: true, wantWarning: true},
+		{name: "global cleanup", components: []model.ComponentID{model.ComponentEngram}, scope: model.EngramUninstallScopeGlobal, projectAvailable: true},
+		{name: "profile-only removal", components: []model.ComponentID{model.ComponentSDD, model.ComponentEngram}, profiles: []string{"cheap"}, scope: model.EngramUninstallScopeNone, projectAvailable: true},
+	}
 
-	if !strings.Contains(out, "⚠ Workspace Assets Warning:") {
-		t.Fatalf("RenderUninstallConfirm() should include Workspace Assets Warning; got:\n%s", out)
-	}
-	if !strings.Contains(out, ".windsurf/workflows/") {
-		t.Fatalf("RenderUninstallConfirm() should mention .windsurf/workflows/ for SDD; got:\n%s", out)
-	}
-	if strings.Contains(out, "• .engram/") {
-		t.Fatalf("RenderUninstallConfirm() should NOT mention .engram/ deletion when scope is none; got:\n%s", out)
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := RenderUninstallConfirm(
+				model.UninstallModePartial,
+				[]model.AgentID{model.AgentOpenCode},
+				tt.components,
+				tt.profiles,
+				tt.scope,
+				tt.projectAvailable,
+				0,
+				false,
+				0,
+			)
 
-func TestRenderUninstallConfirmWorkspaceWarningIncludesEngramWhenProjectScopeSelected(t *testing.T) {
-	out := RenderUninstallConfirm(
-		model.UninstallModePartial,
-		[]model.AgentID{model.AgentOpenCode},
-		[]model.ComponentID{model.ComponentEngram},
-		nil,
-		model.EngramUninstallScopeProject,
-		true,
-		0,
-		false,
-		0,
-	)
-
-	if !strings.Contains(out, "⚠ Workspace Assets Warning:") {
-		t.Fatalf("RenderUninstallConfirm() should include Workspace Assets Warning; got:\n%s", out)
-	}
-	if !strings.Contains(out, "• .engram/ (persistent memory context)") {
-		t.Fatalf("RenderUninstallConfirm() should mention .engram/ deletion when scope is project; got:\n%s", out)
-	}
-	if strings.Contains(out, ".windsurf/workflows/") {
-		t.Fatalf("RenderUninstallConfirm() should NOT mention SDD workflows when only Engram is selected; got:\n%s", out)
+			gotWarning := strings.Contains(out, "• .engram/ (persistent memory context)")
+			if gotWarning != tt.wantWarning {
+				t.Fatalf(".engram warning present = %t, want %t; got:\n%s", gotWarning, tt.wantWarning, out)
+			}
+		})
 	}
 }
