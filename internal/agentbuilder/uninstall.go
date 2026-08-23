@@ -74,18 +74,24 @@ func Uninstall(registryPath, agentName, homeDir string) (UninstallResult, error)
 		}
 
 		if info.Mode()&os.ModeSymlink != 0 {
-			if err := os.Remove(skillDir); err != nil && !os.IsNotExist(err) {
-				return result, fmt.Errorf("uninstall: remove symlink %s: %w", skillDir, err)
+			if err := os.Remove(skillDir); err != nil {
+				if !os.IsNotExist(err) {
+					return result, fmt.Errorf("uninstall: remove symlink %s: %w", skillDir, err)
+				}
+			} else {
+				result.RemovedPaths = append(result.RemovedPaths, skillDir)
 			}
-			result.RemovedPaths = append(result.RemovedPaths, skillDir)
 			continue
 		}
 
 		skillFile := filepath.Join(skillDir, "SKILL.md")
-		if err := os.Remove(skillFile); err != nil && !os.IsNotExist(err) {
-			return result, fmt.Errorf("uninstall: remove %s: %w", skillFile, err)
+		if err := os.Remove(skillFile); err != nil {
+			if !os.IsNotExist(err) {
+				return result, fmt.Errorf("uninstall: remove %s: %w", skillFile, err)
+			}
+		} else {
+			result.RemovedPaths = append(result.RemovedPaths, skillFile)
 		}
-		result.RemovedPaths = append(result.RemovedPaths, skillFile)
 
 		removeIfEmpty(skillDir)
 	}

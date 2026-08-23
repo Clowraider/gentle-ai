@@ -35,6 +35,10 @@ func TestUninstall_SuccessScenarios(t *testing.T) {
 		{"removes registry entry after success", "remove-me", []RegistryEntry{entry("remove-me", model.AgentClaudeCode), entry("keep-me", model.AgentOpenCode)}, map[string][]model.AgentID{"owned": {model.AgentClaudeCode}}, nil, nil, nil, nil, []string{"remove-me"}, []string{"keep-me"}},
 		{"removes first agent when multiple exist without mutating pointer", "first-agent", []RegistryEntry{entry("first-agent", model.AgentClaudeCode), entry("other-agent", model.AgentOpenCode)}, map[string][]model.AgentID{"owned": {model.AgentClaudeCode}, "other-agent": {model.AgentOpenCode}}, nil, []string{"owned"}, []string{"other-agent"}, nil, []string{"first-agent"}, []string{"other-agent"}},
 		{"missing owned file does not fail", "missing-file-agent", []RegistryEntry{entry("missing-file-agent", model.AgentClaudeCode)}, nil, nil, nil, nil, nil, nil, nil},
+		{"existing skill dir without skill file reports no removed paths", "empty-dir-agent", []RegistryEntry{entry("empty-dir-agent", model.AgentClaudeCode)}, nil, func(ctx *uninstallCtx) {
+			skillsDir := supportedSkillsDirs(filepath.Dir(ctx.registryPath))[model.AgentClaudeCode]
+			_ = os.MkdirAll(filepath.Join(skillsDir, "empty-dir-agent"), 0755)
+		}, nil, nil, nil, []string{"empty-dir-agent"}, nil},
 		{"unknown installed agent is skipped safely", "unknown-agent-reviewer", []RegistryEntry{entry("unknown-agent-reviewer", model.AgentClaudeCode, model.AgentID("unknown-agent"))}, map[string][]model.AgentID{"owned": {model.AgentClaudeCode}}, nil, []string{"owned"}, nil, []model.AgentID{model.AgentID("unknown-agent")}, nil, nil},
 		{"does not delete parent or shared directories", "agent-a", []RegistryEntry{entry("agent-a", model.AgentOpenCode)}, map[string][]model.AgentID{"owned": {model.AgentOpenCode}, "shared": {model.AgentOpenCode}}, func(ctx *uninstallCtx) {
 			sharedDir := filepath.Dir(ctx.paths["shared"][0])
