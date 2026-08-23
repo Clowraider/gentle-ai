@@ -1,6 +1,7 @@
 package agentbuilder
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,12 +15,26 @@ type AdapterInfo struct {
 	SkillsDir string
 }
 
+// validateAgentName checks for path traversal characters and ensures the name is a clean single-segment identifier.
+func validateAgentName(name string) error {
+	if name == "" {
+		return fmt.Errorf("agent name must not be empty")
+	}
+	if filepath.IsAbs(name) || name == "." || name == ".." || filepath.Base(name) != name {
+		return fmt.Errorf("invalid agent name %q: must be a clean relative identifier", name)
+	}
+	return nil
+}
+
 // Install writes the SKILL.md for agent into each adapter's skills directory.
 // On any write failure all previously written files are rolled back (deleted).
 // Returns one InstallResult per adapter.
 func Install(agent *GeneratedAgent, adapters []AdapterInfo, _ string) ([]InstallResult, error) {
 	if agent == nil {
 		return nil, fmt.Errorf("install: agent must not be nil")
+	}
+	if err := validateAgentName(agent.Name); err != nil {
+		return nil, fmt.Errorf("install: %w", err)
 	}
 
 	results := make([]InstallResult, 0, len(adapters))
@@ -64,6 +79,36 @@ func Install(agent *GeneratedAgent, adapters []AdapterInfo, _ string) ([]Install
 	}
 
 	return results, nil
+}
+
+// Uninstall removes the SKILL.md and its containing directory for agentName from each adapter's skills directory.
+// Returns a list of paths successfully removed and an aggregate error if any unexpected removal failure occurs.
+func Uninstall(agentName string, adapters []AdapterInfo) ([]string, error) {
+	if err := validateAgentName(agentName); err != nil {
+		return nil, fmt.Errorf("uninstall: %w", err)
+	}
+
+	var removed []string
+	var errs []error
+	for _, adapter := range adapters {
+		skillDir := filepath.Join(adapter.SkillsDir, agentName)
+		skillFile := filepath.Join(skillDir, "SKILL.md")
+
+		if err := os.Remove(skillFile); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				errs = append(errs, fmt.Errorf("remove %s: %w", skillFile, err))
+			}
+		} else {
+			removed = append(removed, skillFile)
+		}
+
+		_ = os.Remove(skillDir)
+	}
+
+	if len(errs) > 0 {
+		return removed, errors.Join(errs...)
+	}
+	return removed, nil
 }
 
 // rollback removes all files in paths, ignoring errors (best-effort cleanup).
