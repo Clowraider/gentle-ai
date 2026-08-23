@@ -43,7 +43,31 @@ func TestRenderCustomAgentDelete(t *testing.T) {
 	if !strings.Contains(out, "Delete Custom Agent") || !strings.Contains(out, "my-custom-agent") {
 		t.Errorf("expected title and agent name, got: %s", out)
 	}
+	if !strings.Contains(out, "supported installed agent skill directories") {
+		t.Errorf("expected accurate deletion scope description, got: %s", out)
+	}
 	if count := CustomAgentDeleteOptionCount(); count != 2 {
 		t.Errorf("CustomAgentDeleteOptionCount = %d, want 2", count)
+	}
+}
+
+func TestRenderCustomAgents_SanitizesControlCharacters(t *testing.T) {
+	agents := []agentbuilder.RegistryEntry{
+		{Name: "agent\x1b[31m-name\nwith-newline", Title: "Title\x1b[0m\r\nInjected"},
+	}
+	out := RenderCustomAgents(agents, 0, nil, true)
+	if strings.Contains(out, "\nwith-newline") || strings.Contains(out, "\x1b[31m") {
+		t.Errorf("expected control characters and newlines sanitized from Name, got: %q", out)
+	}
+	if strings.Contains(out, "\r") || strings.Contains(out, "\x1b[0m") {
+		t.Errorf("expected control characters sanitized from Title, got: %q", out)
+	}
+	if !strings.Contains(out, "agent-namewith-newline ─── TitleInjected") {
+		t.Errorf("expected sanitized label in output, got: %s", out)
+	}
+
+	deleteOut := RenderCustomAgentDelete("agent\nname\x1b[31m", 0)
+	if strings.Contains(deleteOut, "\nname") || strings.Contains(deleteOut, "\x1b[31m") {
+		t.Errorf("expected delete screen to sanitize agent name, got: %q", deleteOut)
 	}
 }
