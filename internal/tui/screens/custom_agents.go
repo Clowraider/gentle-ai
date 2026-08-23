@@ -2,11 +2,26 @@ package screens
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/gentleman-programming/gentle-ai/v2/internal/agentbuilder"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/tui/styles"
 )
+
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+// sanitizeLabel removes ANSI escape codes, newlines, and non-printable control characters from text before rendering.
+func sanitizeLabel(s string) string {
+	s = ansiRegex.ReplaceAllString(s, "")
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
 
 // RenderCustomAgents renders the Custom Agents list and management screen.
 // It displays existing custom agents and provides actions to create, delete, or return.
@@ -34,9 +49,11 @@ func RenderCustomAgents(agents []agentbuilder.RegistryEntry, cursor int, err err
 
 	options := make([]string, 0, len(agents)+2)
 	for _, a := range agents {
-		label := fmt.Sprintf("• %s", a.Name)
-		if a.Title != "" {
-			label = fmt.Sprintf("• %s ─── %s", a.Name, a.Title)
+		name := sanitizeLabel(a.Name)
+		title := sanitizeLabel(a.Title)
+		label := fmt.Sprintf("• %s", name)
+		if title != "" {
+			label = fmt.Sprintf("• %s ─── %s", name, title)
 		}
 		options = append(options, label)
 	}
@@ -67,10 +84,11 @@ func RenderCustomAgentDelete(agentName string, cursor int) string {
 	b.WriteString(styles.TitleStyle.Render("Delete Custom Agent"))
 	b.WriteString("\n\n")
 
-	b.WriteString(styles.WarningStyle.Render(fmt.Sprintf("Are you sure you want to delete custom agent %q?", agentName)))
+	safeName := sanitizeLabel(agentName)
+	b.WriteString(styles.WarningStyle.Render(fmt.Sprintf("Are you sure you want to delete custom agent %q?", safeName)))
 	b.WriteString("\n\n")
 
-	b.WriteString(styles.SubtextStyle.Render("This will remove the agent from the registry and delete its SKILL.md from all installed agent skill directories."))
+	b.WriteString(styles.SubtextStyle.Render("This will remove the agent from the registry and delete its SKILL.md from all supported installed agent skill directories."))
 	b.WriteString("\n\n")
 
 	b.WriteString(styles.WarningStyle.Render("This action cannot be undone."))
