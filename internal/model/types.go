@@ -71,8 +71,9 @@ const (
 	AgentPi            AgentID = "pi"
 	AgentTrae          AgentID = "trae-ide"
 	AgentHermes        AgentID = "hermes"
-	AgentGitHubCopilotCLI AgentID = "github-copilot-cli"
 )
+
+const AgentGitHubCopilotCLI AgentID = "github-copilot-cli"
 
 // SupportTier indicates how fully an agent supports the Gentleman AI ecosystem.
 // All current agents receive the full SDD orchestrator, skill files, MCP config,
