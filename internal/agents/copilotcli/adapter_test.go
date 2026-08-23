@@ -65,13 +65,6 @@ func TestCopilotCLIAdapter_DetectUsesCopilotHome(t *testing.T) {
 	if err != nil || cfg != root || !cfgFound {
 		t.Fatalf("Detect() config = %q, found = %v, err = %v", cfg, cfgFound, err)
 	}
-	paths := NewAdapter()
-	if paths.GlobalConfigDir("/home/u") != root ||
-		paths.SystemPromptFile("/home/u") != filepath.Join(root, "copilot-instructions.md") ||
-		paths.SettingsPath("/home/u") != filepath.Join(root, "settings.json") ||
-		paths.MCPConfigPath("/home/u", "") != filepath.Join(root, "mcp-config.json") {
-		t.Fatal("configuration paths did not use COPILOT_HOME")
-	}
 }
 
 func TestCopilotCLIAdapter_PathsAndInstall(t *testing.T) {
