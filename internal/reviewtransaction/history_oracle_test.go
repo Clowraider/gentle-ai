@@ -55,6 +55,31 @@ func TestCheckHistoryKeepsLineagesIndependent(t *testing.T) {
 	}
 }
 
+func TestCanonicalHistorySchedulesStayInsideApprovedGateBudget(t *testing.T) {
+	if len(CanonicalHistorySchedules) == 0 {
+		t.Fatal("canonical schedule manifest is empty")
+	}
+	for _, schedule := range CanonicalHistorySchedules {
+		if schedule.Name == "" || schedule.Actors > 3 || schedule.Operations > MaxOracleHistoryEvents || schedule.SchedulerDecisions > 32 || schedule.Faults > 1 || schedule.Restarts > 1 {
+			t.Fatalf("schedule outside bounded v1: %#v", schedule)
+		}
+	}
+}
+
+func TestCheckHistoryLivenessRequiresBoundedUsableOutcome(t *testing.T) {
+	complete := []HistoryEvent{
+		historyEvent("start", HistoryStart, 1, 2, HistoryAbsent, HistoryReviewing, HistoryEffectNone, HistoryEffectNone, "created", "", "r1"),
+		historyEvent("finalize", HistoryFinalize, 3, 4, HistoryReviewing, HistoryApproved, HistoryEffectNone, HistoryEffectPending, "approved", "r1", "r2"),
+		historyEvent("reconcile", HistoryReconcile, 5, 6, HistoryApproved, HistoryApproved, HistoryEffectPending, HistoryEffectApplied, "applied", "", "r2"),
+	}
+	if err := CheckHistoryLiveness(complete, HistoryLivenessBounds{MaxTransitions: 4, MaxCASAttempts: 2}); err != nil {
+		t.Fatalf("CheckHistoryLiveness() error = %v", err)
+	}
+	if err := CheckHistoryLiveness(complete[:2], HistoryLivenessBounds{MaxTransitions: 4, MaxCASAttempts: 2}); err == nil {
+		t.Fatal("CheckHistoryLiveness() accepted a pending effect")
+	}
+}
+
 func historyEvent(id string, operation HistoryOperation, started, completed uint64, before, after HistoryAuthority, beforeEffect, afterEffect HistoryEffect, result, expected, observed string) HistoryEvent {
 	return HistoryEvent{
 		InvocationID: id, Actor: id, Operation: operation, LineageID: "lineage", IdempotencyKey: "request",
