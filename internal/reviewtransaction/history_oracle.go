@@ -3,6 +3,8 @@ package reviewtransaction
 import (
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 )
 
 const (
@@ -132,6 +134,24 @@ func (event HistoryEvent) preserves(model historyModel) bool {
 	return event.AfterAuthority == model.authority && event.AfterEffect == model.effect && event.ObservedRevision == model.revision
 }
 
+func canonicalSearchKey(used uint16, models map[string]historyModel) string {
+	if len(models) == 0 {
+		return fmt.Sprintf("%d:", used)
+	}
+	lineages := make([]string, 0, len(models))
+	for lineage := range models {
+		lineages = append(lineages, lineage)
+	}
+	sort.Strings(lineages)
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d", used)
+	for _, lineage := range lineages {
+		m := models[lineage]
+		fmt.Fprintf(&b, "|%s:%s:%s:%s:%s", lineage, m.authority, m.effect, m.revision, m.idempotencyID)
+	}
+	return b.String()
+}
+
 func CheckHistory(events []HistoryEvent) ([]HistoryEvent, error) {
 	if len(events) > MaxOracleHistoryEvents {
 		return nil, fmt.Errorf("%w: %d events, maximum %d", ErrOracleHistoryBound, len(events), MaxOracleHistoryEvents)
@@ -149,13 +169,22 @@ func CheckHistory(events []HistoryEvent) ([]HistoryEvent, error) {
 			}
 		}
 	}
+	visited := make(map[string]bool)
 	states, order := 0, make([]HistoryEvent, 0, len(events))
 	var search func(uint16, map[string]historyModel) bool
 	search = func(used uint16, models map[string]historyModel) bool {
 		states++
-		if states > MaxOracleSearchStates || len(order) == len(events) {
-			return len(order) == len(events)
+		if states > MaxOracleSearchStates {
+			return false
 		}
+		if len(order) == len(events) {
+			return true
+		}
+		key := canonicalSearchKey(used, models)
+		if visited[key] {
+			return false
+		}
+		visited[key] = true
 		for index, event := range events {
 			bit := uint16(1 << index)
 			if used&bit != 0 || predecessors[index]&^used != 0 {
