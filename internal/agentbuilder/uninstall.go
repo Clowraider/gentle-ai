@@ -21,8 +21,8 @@ type UninstallResult struct {
 	SkippedAgents []model.AgentID
 }
 
-// Uninstall removes the registry entry first, then best-effort deletes the
-// exact SKILL.md files owned by that entry.
+// Uninstall removes the exact SKILL.md files owned by that entry, then
+// removes and saves the registry entry.
 func Uninstall(registryPath, agentName, homeDir string) (UninstallResult, error) {
 	if registryPath == "" {
 		return UninstallResult{}, fmt.Errorf("uninstall: registry path must not be empty")
@@ -44,7 +44,6 @@ func Uninstall(registryPath, agentName, homeDir string) (UninstallResult, error)
 		return UninstallResult{}, fmt.Errorf("uninstall: agent %q not found in registry", agentName)
 	}
 
-	savedEntry := *entry
 	targetName := entry.Name
 	if err := validateTargetName(targetName); err != nil {
 		return UninstallResult{}, fmt.Errorf("uninstall: invalid registry entry name %q: %w", targetName, err)
@@ -52,13 +51,6 @@ func Uninstall(registryPath, agentName, homeDir string) (UninstallResult, error)
 	installedAgents := append([]model.AgentID(nil), entry.InstalledAgents...)
 
 	result := UninstallResult{}
-	if !registry.RemoveByName(agentName) {
-		return result, fmt.Errorf("uninstall: agent %q disappeared from registry", agentName)
-	}
-	if err := saveRegistry(registryPath, registry); err != nil {
-		return result, fmt.Errorf("uninstall: save registry: %w", err)
-	}
-
 	skillsDirs := supportedSkillsDirs(homeDir)
 
 	for _, agentID := range installedAgents {
@@ -70,19 +62,39 @@ func Uninstall(registryPath, agentName, homeDir string) (UninstallResult, error)
 
 		skillDir, err := uninstallSkillDir(skillsDir, targetName)
 		if err != nil {
-			registry.Add(savedEntry)
-			_ = saveRegistry(registryPath, registry)
 			return result, fmt.Errorf("uninstall: invalid registry entry name %q for agent %s: %w", targetName, agentID, err)
 		}
+
+		info, err := os.Lstat(skillDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return result, fmt.Errorf("uninstall: stat %s: %w", skillDir, err)
+		}
+
+		if info.Mode()&os.ModeSymlink != 0 {
+			if err := os.Remove(skillDir); err != nil && !os.IsNotExist(err) {
+				return result, fmt.Errorf("uninstall: remove symlink %s: %w", skillDir, err)
+			}
+			result.RemovedPaths = append(result.RemovedPaths, skillDir)
+			continue
+		}
+
 		skillFile := filepath.Join(skillDir, "SKILL.md")
 		if err := os.Remove(skillFile); err != nil && !os.IsNotExist(err) {
-			registry.Add(savedEntry)
-			_ = saveRegistry(registryPath, registry)
 			return result, fmt.Errorf("uninstall: remove %s: %w", skillFile, err)
 		}
 		result.RemovedPaths = append(result.RemovedPaths, skillFile)
 
 		removeIfEmpty(skillDir)
+	}
+
+	if !registry.RemoveByName(agentName) {
+		return result, fmt.Errorf("uninstall: agent %q disappeared from registry", agentName)
+	}
+	if err := saveRegistry(registryPath, registry); err != nil {
+		return result, fmt.Errorf("uninstall: save registry: %w", err)
 	}
 
 	return result, nil
