@@ -44,6 +44,9 @@ func Uninstall(registryPath, agentName, homeDir string) (UninstallResult, error)
 		return UninstallResult{}, fmt.Errorf("uninstall: agent %q not found in registry", agentName)
 	}
 
+	targetName := entry.Name
+	installedAgents := append([]model.AgentID(nil), entry.InstalledAgents...)
+
 	result := UninstallResult{}
 	if !registry.RemoveByName(agentName) {
 		return result, fmt.Errorf("uninstall: agent %q disappeared from registry", agentName)
@@ -54,16 +57,16 @@ func Uninstall(registryPath, agentName, homeDir string) (UninstallResult, error)
 
 	skillsDirs := supportedSkillsDirs(homeDir)
 
-	for _, agentID := range entry.InstalledAgents {
+	for _, agentID := range installedAgents {
 		skillsDir, ok := skillsDirs[agentID]
 		if !ok {
 			result.SkippedAgents = append(result.SkippedAgents, agentID)
 			continue
 		}
 
-		skillDir, err := uninstallSkillDir(skillsDir, entry.Name)
+		skillDir, err := uninstallSkillDir(skillsDir, targetName)
 		if err != nil {
-			return result, fmt.Errorf("uninstall: invalid registry entry name %q for agent %s: %w", entry.Name, agentID, err)
+			return result, fmt.Errorf("uninstall: invalid registry entry name %q for agent %s: %w", targetName, agentID, err)
 		}
 		skillFile := filepath.Join(skillDir, "SKILL.md")
 		if err := os.Remove(skillFile); err != nil && !os.IsNotExist(err) {
