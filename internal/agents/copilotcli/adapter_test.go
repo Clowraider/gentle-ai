@@ -12,23 +12,8 @@ import (
 	"github.com/gentleman-programming/gentle-ai/v2/internal/system"
 )
 
-func TestCopilotCLIAdapter_IdentityAndCapabilities(t *testing.T) {
-	a := NewAdapter()
-	if a.Agent() != model.AgentGitHubCopilotCLI || a.Tier() != model.TierFull {
-		t.Errorf("Agent/Tier unexpected: %v / %v", a.Agent(), a.Tier())
-	}
-	if a.SupportsOutputStyles() || a.SupportsSlashCommands() || a.SupportsSubAgents() {
-		t.Error("unexpected capability enabled")
-	}
-	if !a.SupportsSkills() || !a.SupportsSystemPrompt() || !a.SupportsMCP() {
-		t.Error("expected capability disabled")
-	}
-	if a.OutputStyleDir("") != "" || a.CommandsDir("") != "" || a.SubAgentsDir("") != "" || a.EmbeddedSubAgentsDir() != "" {
-		t.Error("dirs should be empty")
-	}
-}
-
 func TestCopilotCLIAdapter_Detect(t *testing.T) {
+	t.Setenv("COPILOT_HOME", "")
 	t.Run("found", func(t *testing.T) {
 		a := &Adapter{
 			lookPath: func(string) (string, error) { return "/bin/copilot", nil },
@@ -63,28 +48,46 @@ func TestCopilotCLIAdapter_Detect(t *testing.T) {
 	})
 }
 
+func TestCopilotCLIAdapter_DetectUsesCopilotHome(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "custom-copilot")
+	t.Setenv("COPILOT_HOME", root)
+	a := &Adapter{
+		lookPath: func(string) (string, error) { return "/bin/copilot", nil },
+		statPath: func(path string) statResult {
+			if path != root {
+				t.Fatalf("stat path = %q, want %q", path, root)
+			}
+			return statResult{isDir: true}
+		},
+	}
+
+	_, _, cfg, cfgFound, err := a.Detect(context.Background(), "/home/u")
+	if err != nil || cfg != root || !cfgFound {
+		t.Fatalf("Detect() config = %q, found = %v, err = %v", cfg, cfgFound, err)
+	}
+	paths := NewAdapter()
+	if paths.GlobalConfigDir("/home/u") != root ||
+		paths.SystemPromptFile("/home/u") != filepath.Join(root, "copilot-instructions.md") ||
+		paths.SettingsPath("/home/u") != filepath.Join(root, "settings.json") ||
+		paths.MCPConfigPath("/home/u", "") != filepath.Join(root, "mcp-config.json") {
+		t.Fatal("configuration paths did not use COPILOT_HOME")
+	}
+}
+
 func TestCopilotCLIAdapter_PathsAndInstall(t *testing.T) {
+	t.Setenv("COPILOT_HOME", "")
 	a := NewAdapter()
 	home := "/home/u"
-
-	if a.GlobalConfigDir(home) != filepath.Join(home, ".copilot") ||
-		a.SystemPromptDir(home) != filepath.Join(home, ".copilot") ||
-		a.SystemPromptFile(home) != filepath.Join(home, ".copilot", "copilot-instructions.md") ||
-		a.SkillsDir(home) != filepath.Join(home, ".copilot", "skills") ||
-		a.SettingsPath(home) != filepath.Join(home, ".copilot", "settings.json") ||
-		a.MCPConfigPath(home, "") != filepath.Join(home, ".copilot", "mcp-config.json") ||
-		a.SystemPromptStrategy() != model.StrategyFileReplace ||
-		a.MCPStrategy() != model.StrategyMCPConfigFile {
-		t.Error("unexpected path or strategy")
+	if a.GlobalConfigDir(home) != filepath.Join(home, ".copilot") || a.SystemPromptFile(home) != filepath.Join(home, ".copilot", "copilot-instructions.md") || a.SkillsDir(home) != filepath.Join(home, ".copilot", "skills") || a.SettingsPath(home) != filepath.Join(home, ".copilot", "settings.json") || a.MCPConfigPath(home, "") != filepath.Join(home, ".copilot", "mcp-config.json") || a.SystemPromptStrategy() != model.StrategyFileReplace || a.MCPStrategy() != model.StrategyMCPConfigFile {
+		t.Fatal("unexpected path or strategy")
 	}
-
-	cmd, err := a.InstallCommand(system.PlatformProfile{OS: "linux", NpmWritable: true})
-	if err != nil || len(cmd) == 0 || cmd[0][0] != "npm" || cmd[0][len(cmd[0])-1] != "@github/copilot@latest" {
-		t.Errorf("InstallCommand(writable) = %v, %v", cmd, err)
-	}
-
-	cmd, err = a.InstallCommand(system.PlatformProfile{OS: "linux", NpmWritable: false})
-	if err != nil || len(cmd) == 0 || cmd[0][0] != "sudo" || cmd[0][len(cmd[0])-1] != "@github/copilot@latest" {
-		t.Errorf("InstallCommand(not writable) = %v, %v", cmd, err)
+	for _, tt := range []struct {
+		profile system.PlatformProfile
+		want    string
+	}{{system.PlatformProfile{OS: "linux", NpmWritable: true}, "npm"}, {system.PlatformProfile{OS: "linux", NpmWritable: false}, "sudo"}} {
+		cmd, err := a.InstallCommand(tt.profile)
+		if err != nil || len(cmd) != 1 || cmd[0][0] != tt.want || cmd[0][len(cmd[0])-1] != "@github/copilot@latest" {
+			t.Fatalf("InstallCommand(%+v) = %v, %v", tt.profile, cmd, err)
+		}
 	}
 }

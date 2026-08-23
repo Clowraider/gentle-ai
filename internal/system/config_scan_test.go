@@ -69,20 +69,20 @@ func TestScanConfigs_AgentFieldMatchesModelAgentID(t *testing.T) {
 
 	// These are the AgentID string values the TUI switch statements check.
 	knownAgents := map[string]bool{
-		"claude-code":    false,
-		"opencode":       false,
-		"kilocode":       false,
-		"gemini-cli":     false,
-		"cursor":         false,
-		"vscode-copilot": false,
-		"codex":          false,
-		"antigravity":    false,
-		"windsurf":       false,
-		"kimi":           false,
-		"qwen-code":      false,
-		"kiro-ide":       false,
-		"openclaw":       false,
-		"pi":             false,
+		"claude-code":        false,
+		"opencode":           false,
+		"kilocode":           false,
+		"gemini-cli":         false,
+		"cursor":             false,
+		"vscode-copilot":     false,
+		"codex":              false,
+		"antigravity":        false,
+		"windsurf":           false,
+		"kimi":               false,
+		"qwen-code":          false,
+		"kiro-ide":           false,
+		"openclaw":           false,
+		"pi":                 false,
 		"trae-ide":           false,
 		"hermes":             false,
 		"github-copilot-cli": false,
@@ -169,6 +169,7 @@ func TestScanConfigs_IsDirectorySetForExistingDirs(t *testing.T) {
 }
 
 func TestScanConfigs_CopilotCLIAndVSCodeDoNotCollide(t *testing.T) {
+	t.Setenv("COPILOT_HOME", "")
 	home := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(home, ".copilot"), 0o755); err != nil {
 		t.Fatalf("MkdirAll(.copilot): %v", err)
@@ -207,6 +208,25 @@ func TestScanConfigs_CopilotCLIAndVSCodeDoNotCollide(t *testing.T) {
 			t.Errorf("vscode-copilot Exists = false, want true for github.copilot-1.2.3")
 		}
 	}
+}
+
+func TestScanConfigs_UsesCopilotHome(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "custom-copilot")
+	t.Setenv("COPILOT_HOME", root)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("MkdirAll(COPILOT_HOME): %v", err)
+	}
+
+	for _, config := range ScanConfigs(t.TempDir()) {
+		if config.Agent != "github-copilot-cli" {
+			continue
+		}
+		if config.Path != root || !config.Exists || !config.IsDirectory {
+			t.Fatalf("github-copilot-cli = %+v, want path %q present directory", config, root)
+		}
+		return
+	}
+	t.Fatal("ScanConfigs() missing github-copilot-cli entry")
 }
 
 // agentNames extracts agent name strings for error messages.
