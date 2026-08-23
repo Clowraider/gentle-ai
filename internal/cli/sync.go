@@ -1901,6 +1901,13 @@ func RunSync(args []string) (SyncResult, error) {
 	// disk read on the CLI path).
 	applyResolvedPersona(&selection, persistedState.Persona)
 	if scope == ScopeWorkspace {
+		components := selection.Components[:0]
+		for _, component := range selection.Components {
+			if workspaceSyncComponent(component) {
+				components = append(components, component)
+			}
+		}
+		selection.Components = components
 		background = OpenCodeBackgroundResolution{}
 		piBackground = PiBackgroundResolution{}
 	}

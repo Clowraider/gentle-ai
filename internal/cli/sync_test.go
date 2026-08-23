@@ -236,9 +236,28 @@ func TestRunSyncWorkspaceScopeRefreshesClaudeWithoutGlobalMutation(t *testing.T)
 		backup.UserHomeDirFn = restoreBackupHome
 	})
 
-	result, err := RunSync([]string{"--scope", "workspace", "--agent", "claude-code"})
+	args := []string{"--scope", "workspace", "--agent", "claude-code", "--include-permissions", "--include-theme"}
+	wantComponents := []model.ComponentID{
+		model.ComponentPersona,
+		model.ComponentSDD,
+		model.ComponentEngram,
+		model.ComponentContext7,
+		model.ComponentSkills,
+	}
+	dryResult, err := RunSync(append(args, "--dry-run"))
+	if err != nil {
+		t.Fatalf("RunSync(dry-run) error = %v", err)
+	}
+	if !reflect.DeepEqual(dryResult.Selection.Components, wantComponents) {
+		t.Fatalf("dry-run components = %v, want %v", dryResult.Selection.Components, wantComponents)
+	}
+
+	result, err := RunSync(args)
 	if err != nil {
 		t.Fatalf("RunSync() error = %v", err)
+	}
+	if !reflect.DeepEqual(result.Selection.Components, wantComponents) {
+		t.Fatalf("components = %v, want %v", result.Selection.Components, wantComponents)
 	}
 	workspacePrompt := filepath.Join(workspace, ".claude", "CLAUDE.md")
 	if _, err := os.Stat(workspacePrompt); err != nil {
