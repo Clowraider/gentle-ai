@@ -145,6 +145,10 @@ func AssessTargetStatus(ctx context.Context, repo string, request TargetStatusRe
 // status classification so callers can derive related routing artifacts from
 // the same immutable candidate tree instead of rereading a mutable worktree.
 func AssessTargetStatusWithSnapshot(ctx context.Context, repo string, request TargetStatusRequest) (TargetStatusResult, Snapshot, error) {
+	boundary := HistoryBoundary{Operation: "STATUS", LineageID: request.LineageID}
+	if err := reachHistory(ctx, request.LineageID, HistoryAfterRead, boundary); err != nil {
+		return TargetStatusResult{}, Snapshot{}, err
+	}
 	if request.LineageID != "" {
 		request.LineageID = strings.TrimSpace(request.LineageID)
 		if err := validateLineageID(request.LineageID); err != nil {

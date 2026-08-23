@@ -34,6 +34,10 @@ type CompactGateTargetAssessment struct {
 // receipt has been selected.
 func AssessCompactGateTarget(ctx context.Context, repo string, state CompactState, input NativeGateRequestInput) (CompactGateTargetAssessment, error) {
 	assessment := CompactGateTargetAssessment{Expected: state.CurrentSnapshot}
+	boundary := HistoryBoundary{Operation: "VALIDATE", LineageID: state.LineageID, Revision: state.EvidenceAuthorityRevision}
+	if err := reachHistory(ctx, state.LineageID, HistoryAfterRead, boundary); err != nil {
+		return assessment, err
+	}
 	if err := state.Validate(); err != nil {
 		return assessment, fmt.Errorf("validate compact gate target authority: %w", err)
 	}

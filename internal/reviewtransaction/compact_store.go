@@ -1558,11 +1558,18 @@ func (store CompactStore) CreateOrReplayAtomicStart(ctx context.Context, request
 		}
 		defer maintenance.Release()
 	}
+	boundary := HistoryBoundary{Operation: "START", LineageID: store.lineageID}
+	if err := reachHistory(ctx, store.lineageID, HistoryBeforeLock, boundary); err != nil {
+		return CompactAtomicStartResult{}, err
+	}
 	lock, err := acquireCompactStartLock(ctx, store.lockPath)
 	if err != nil {
 		return CompactAtomicStartResult{}, err
 	}
 	defer lock.release()
+	if err := reachHistory(ctx, store.lineageID, HistoryAfterLock, boundary); err != nil {
+		return CompactAtomicStartResult{}, err
+	}
 	if err := lease.Validate(ctx); err != nil {
 		return CompactAtomicStartResult{}, err
 	}
@@ -1582,6 +1589,13 @@ func (store CompactStore) CreateOrReplayAtomicStart(ctx context.Context, request
 		if field := compactAtomicStartMismatch(*record.State.InitialAtomicStart, request.Binding); field != "" {
 			return conflict(field)
 		}
+		boundary.Revision = record.Revision
+		if err := reachHistory(ctx, store.lineageID, HistoryAfterRead, boundary); err != nil {
+			return CompactAtomicStartResult{}, err
+		}
+		if err := reachHistory(ctx, store.lineageID, HistoryBeforeResponse, boundary); err != nil {
+			return CompactAtomicStartResult{}, err
+		}
 		return CompactAtomicStartResult{Record: record, Replayed: true}, nil
 	}
 	if !os.IsNotExist(err) {
@@ -1594,7 +1608,17 @@ func (store CompactStore) CreateOrReplayAtomicStart(ctx context.Context, request
 	if err != nil {
 		return CompactAtomicStartResult{}, err
 	}
+	boundary.Revision = record.Revision
+	if err := reachHistory(ctx, store.lineageID, HistoryBeforeCAS, boundary); err != nil {
+		return CompactAtomicStartResult{}, err
+	}
 	if err := writeAtomic(store.StatePath(), recordPayload, 0o644); err != nil {
+		return CompactAtomicStartResult{}, err
+	}
+	if err := reachHistory(ctx, store.lineageID, HistoryAfterCommit, boundary); err != nil {
+		return CompactAtomicStartResult{}, err
+	}
+	if err := reachHistory(ctx, store.lineageID, HistoryBeforeResponse, boundary); err != nil {
 		return CompactAtomicStartResult{}, err
 	}
 	return CompactAtomicStartResult{Record: record}, nil
@@ -1710,11 +1734,18 @@ func (store CompactStore) replaceContextGuarded(ctx context.Context, expectedRev
 		}
 		defer maintenance.Release()
 	}
+	boundary := HistoryBoundary{Operation: operation, LineageID: store.lineageID, Revision: expectedRevision}
+	if err := reachHistory(ctx, store.lineageID, HistoryBeforeLock, boundary); err != nil {
+		return "", err
+	}
 	lock, err := acquireLocalStoreLock(store.lockPath)
 	if err != nil {
 		return "", err
 	}
 	defer lock.release()
+	if err := reachHistory(ctx, store.lineageID, HistoryAfterLock, boundary); err != nil {
+		return "", err
+	}
 
 	var current *CompactRecord
 	payload, err := os.ReadFile(store.StatePath())
@@ -1728,6 +1759,9 @@ func (store CompactStore) replaceContextGuarded(ctx context.Context, expectedRev
 		}
 		current = &loaded
 	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	if err := reachHistory(ctx, store.lineageID, HistoryAfterRead, boundary); err != nil {
 		return "", err
 	}
 	if current != nil {
@@ -1763,6 +1797,9 @@ func (store CompactStore) replaceContextGuarded(ctx context.Context, expectedRev
 			LineageID: store.lineageID, Expected: expectedRevision, Current: currentRevision,
 		}
 	}
+	if err := reachHistory(ctx, store.lineageID, HistoryBeforeCAS, boundary); err != nil {
+		return "", err
+	}
 	if current == nil {
 		if operation != "review/start" || next.State != StateReviewing {
 			return "", fmt.Errorf("%w: compact authority must start in reviewing state", ErrInvalidSuccessor)
@@ -1789,11 +1826,18 @@ func (store CompactStore) replaceContextGuarded(ctx context.Context, expectedRev
 	if err := writeAtomic(store.StatePath(), payload, 0o644); err != nil {
 		return "", err
 	}
+	boundary.Revision = record.Revision
+	if err := reachHistory(ctx, store.lineageID, HistoryAfterCommit, boundary); err != nil {
+		return "", err
+	}
 	if store.TracePath != "" {
 		recordCompactTrace(store.TracePath, CompactTraceEntry{
 			Operation: operation, PreviousRevision: currentRevision, Revision: record.Revision,
 			State: next.State, RecordedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		})
+	}
+	if err := reachHistory(ctx, store.lineageID, HistoryBeforeResponse, boundary); err != nil {
+		return "", err
 	}
 	return record.Revision, nil
 }

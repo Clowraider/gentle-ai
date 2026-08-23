@@ -24,6 +24,10 @@ type CompactRepositoryContextResult struct {
 }
 
 func ReconcileCompactRepositoryContext(ctx context.Context, store CompactStore, record CompactRecord) (CompactRepositoryContextResult, error) {
+	boundary := HistoryBoundary{Operation: "RECONCILE", LineageID: record.State.LineageID, Revision: record.Revision}
+	if err := reachHistory(ctx, record.State.LineageID, HistoryAfterRead, boundary); err != nil {
+		return CompactRepositoryContextResult{}, err
+	}
 	var selected *CompactEffectIntent
 	for index := range record.EffectIntents {
 		if record.EffectIntents[index].Class == CompactEffectClassRepositoryContext {
@@ -63,6 +67,10 @@ func reconcileCompactRepositoryContext(ctx context.Context, store CompactStore, 
 		}
 		marker := compactEffectMarker{Schema: compactEffectMarkerSchema, LineageID: record.State.LineageID,
 			AuthorityRevision: record.Revision, EventID: intent.EventID}
+		boundary := HistoryBoundary{Operation: "RECONCILE", LineageID: record.State.LineageID, Revision: record.Revision}
+		if err := reachHistory(ctx, record.State.LineageID, HistoryBeforeEffectRead, boundary); err != nil {
+			return err
+		}
 		if existing, readErr := markers.read(marker.LineageID, marker.AuthorityRevision, marker.EventID); readErr == nil {
 			if existing.State == compactEffectApplied {
 				continue
@@ -97,6 +105,9 @@ func reconcileCompactRepositoryContext(ctx context.Context, store CompactStore, 
 		}
 		path, err := prepareReviewRepositoryContextPath(handle)
 		if err == nil {
+			if err = reachHistory(ctx, record.State.LineageID, HistoryBeforeEffect, boundary); err != nil {
+				return err
+			}
 			err = publishReviewRepositoryContext(path, append(payload, '\n'))
 		}
 		if err != nil {
@@ -134,8 +145,15 @@ func prepareReviewRepositoryContextPath(handle string) (string, error) {
 
 func writeCompactRepositoryContextMarker(ctx context.Context, repository compactEffectMarkerRepository, marker compactEffectMarker, state compactEffectMarkerState, observation compactEffectObservation, cause error) error {
 	marker.State, marker.Observation = state, observation
+	boundary := HistoryBoundary{Operation: "RECONCILE", LineageID: marker.LineageID, Revision: marker.AuthorityRevision}
+	if err := reachHistory(ctx, marker.LineageID, HistoryBeforeMarker, boundary); err != nil {
+		return err
+	}
 	publication, err := repository.write(ctx, marker)
 	if err != nil {
+		return err
+	}
+	if err := reachHistory(ctx, marker.LineageID, HistoryAfterMarker, boundary); err != nil {
 		return err
 	}
 	if cause != nil {
