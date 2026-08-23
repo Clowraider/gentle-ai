@@ -617,6 +617,11 @@ type Model struct {
 	ProfileNameCollision bool            // true when name collides with existing profile (awaiting second enter to overwrite)
 	ProfileDeleteErr     error           // error from the last RemoveProfileAgents call, displayed on ScreenProfiles
 
+	// Custom agent management state
+	CustomAgentsList        []agentbuilder.RegistryEntry
+	CustomAgentDeleteTarget string
+	CustomAgentsErr         error
+
 	// UninstallMode holds the selected uninstall mode (partial, full, full-remove).
 	UninstallMode model.UninstallMode
 
@@ -1240,6 +1245,10 @@ func (m Model) View() string {
 		)
 	case ScreenProfileDelete:
 		return screens.RenderProfileDelete(m.ProfileDeleteTarget, m.Cursor)
+	case ScreenCustomAgents:
+		return screens.RenderCustomAgents(m.CustomAgentsList, m.Cursor, m.CustomAgentsErr, m.hasAgentBuilderEngines())
+	case ScreenCustomAgentDelete:
+		return screens.RenderCustomAgentDelete(m.CustomAgentDeleteTarget, m.Cursor)
 	case ScreenUpgradeSync:
 		return screens.RenderUpgradeSyncWithWidth(m.UpdateResults, m.UpgradeReport, m.SyncFiles, m.UpgradeErr, m.SyncErr, m.OperationRunning, m.UpdateCheckDone, m.Cursor, m.SpinnerFrame, m.Width)
 	case ScreenUninstallMode:
@@ -1722,6 +1731,13 @@ func (m Model) handleKeyPress(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setScreen(ScreenProfileDelete)
 			return m, nil
 		}
+		// Delete on ScreenCustomAgents: only custom agents in CustomAgentsList.
+		if m.Screen == ScreenCustomAgents && m.Cursor < len(m.CustomAgentsList) {
+			m.CustomAgentsErr = nil
+			m.CustomAgentDeleteTarget = m.CustomAgentsList[m.Cursor].Name
+			m.setScreen(ScreenCustomAgentDelete)
+			return m, nil
+		}
 	case "p":
 		// Pin/unpin: only when on ScreenBackups and cursor is on a backup item (not "Back").
 		if m.Screen == ScreenBackups && m.Cursor < len(m.Backups) {
@@ -1800,19 +1816,8 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 		case 4:
 			m.setScreen(ScreenModelConfig)
 		case 5:
-			// "Create your own Agent" — blocked when no engines are available.
-			if !m.hasAgentBuilderEngines() {
-				return m, nil
-			}
-			m.AgentBuilder = AgentBuilderState{}
-			m.AgentBuilder.AvailableEngines = m.detectAgentBuilderEngines()
-			ta := textarea.New()
-			ta.Placeholder = "Describe what you want your agent to do..."
-			ta.Focus()
-			ta.SetWidth(60)
-			ta.SetHeight(5)
-			m.AgentBuilder.Textarea = ta
-			m.setScreen(ScreenAgentBuilderEngine)
+			m.loadCustomAgents()
+			m.setScreen(ScreenCustomAgents)
 		default:
 			next := 6
 			if m.Cursor == next {
@@ -2130,6 +2135,59 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 			}
 		default: // "Cancel"
 			m.setScreen(ScreenProfiles)
+		}
+		return m, nil
+	case ScreenCustomAgents:
+		agentCount := len(m.CustomAgentsList)
+		switch {
+		case m.Cursor < agentCount:
+			// View/select: prompt delete
+			m.CustomAgentsErr = nil
+			m.CustomAgentDeleteTarget = m.CustomAgentsList[m.Cursor].Name
+			m.setScreen(ScreenCustomAgentDelete)
+		case m.Cursor == agentCount:
+			// "Create new agent"
+			if !m.hasAgentBuilderEngines() {
+				return m, nil
+			}
+			m.AgentBuilder = AgentBuilderState{}
+			m.AgentBuilder.AvailableEngines = m.detectAgentBuilderEngines()
+			ta := textarea.New()
+			ta.Placeholder = "Describe what you want your agent to do..."
+			ta.Focus()
+			ta.SetWidth(60)
+			ta.SetHeight(5)
+			m.AgentBuilder.Textarea = ta
+			m.setScreen(ScreenAgentBuilderEngine)
+		default:
+			// "Back"
+			m.setScreen(ScreenWelcome)
+		}
+		return m, nil
+	case ScreenCustomAgentDelete:
+		switch m.Cursor {
+		case 0: // "Delete Agent"
+			home := homeDir()
+			registryPath := filepath.Join(home, ".config", "gentle-ai", "custom-agents.json")
+			_, err := agentbuilder.Uninstall(registryPath, m.CustomAgentDeleteTarget, home)
+			if err != nil {
+				reg, loadErr := agentbuilder.LoadRegistry(registryPath)
+				if loadErr == nil && reg.FindByName(m.CustomAgentDeleteTarget) == nil {
+					m.CustomAgentsErr = nil
+					m.loadCustomAgents()
+					m.setScreen(ScreenCustomAgents)
+					return m, nil
+				}
+				m.CustomAgentsErr = err
+				m.setScreen(ScreenCustomAgents)
+				return m, nil
+			}
+
+			m.CustomAgentsErr = nil
+			m.loadCustomAgents()
+			m.setScreen(ScreenCustomAgents)
+		default: // "Cancel"
+			m.setScreen(ScreenCustomAgents)
 		}
 		return m, nil
 	case ScreenModelConfig:
@@ -3742,6 +3800,12 @@ func (m *Model) setScreen(next Screen) {
 			m.Cursor = 0
 		}
 	}
+	if next == ScreenCustomAgents {
+		m.loadCustomAgents()
+		if m.Cursor >= len(m.CustomAgentsList)+2 {
+			m.Cursor = 0
+		}
+	}
 	if next == ScreenUninstallMode {
 		m.refreshUninstallProfiles()
 		m.UninstallProfilesToRemove = nil
@@ -3918,6 +3982,10 @@ func (m Model) optionCount() int {
 		return screens.ProfileCreateOptionCount(m.ProfileCreateStep, m.ModelPicker)
 	case ScreenProfileDelete:
 		return screens.ProfileDeleteOptionCount()
+	case ScreenCustomAgents:
+		return screens.CustomAgentsOptionCount(m.CustomAgentsList)
+	case ScreenCustomAgentDelete:
+		return screens.CustomAgentDeleteOptionCount()
 	case ScreenAgentBuilderEngine:
 		return len(m.AgentBuilder.AvailableEngines) + 1 // engines + Back
 	case ScreenAgentBuilderPrompt:
@@ -4978,6 +5046,19 @@ func (m Model) detectAgentBuilderEngines() []model.AgentID {
 		}
 	}
 	return available
+}
+
+// loadCustomAgents populates CustomAgentsList from the custom-agents.json registry.
+func (m *Model) loadCustomAgents() {
+	registryPath := filepath.Join(homeDir(), ".config", "gentle-ai", "custom-agents.json")
+	reg, err := agentbuilder.LoadRegistry(registryPath)
+	if err != nil {
+		m.CustomAgentsList = nil
+		m.CustomAgentsErr = err
+		return
+	}
+	m.CustomAgentsList = reg.Agents
+	m.CustomAgentsErr = nil
 }
 
 // hasAgentBuilderEngines reports whether any supported AI agent binary is installed.
