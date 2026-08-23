@@ -741,6 +741,10 @@ func newInstallRuntime(homeDir string, scope InstallScope, channel InstallChanne
 
 func (r *installRuntime) stagePlan() pipeline.StagePlan {
 	targets, targetErr := backupTargets(r.homeDir, r.workspaceDir, r.scope, r.selection, r.resolved)
+	tracksBundle := r.scope == ScopeGlobal && containsAgent(r.resolved.Agents, model.AgentOpenCode) && containsComponent(r.resolved.OrderedComponents, model.ComponentSDD)
+	if tracksBundle {
+		targets = append(targets, managedbundle.ManifestPath(r.homeDir))
+	}
 	prepare := []pipeline.Step{
 		checkDependenciesStep{id: "prepare:check-dependencies", profile: r.profile, homeDir: r.homeDir, selection: r.selection},
 		prepareBackupStep{
@@ -756,7 +760,7 @@ func (r *installRuntime) stagePlan() pipeline.StagePlan {
 			appVersion:  AppVersion,
 		},
 	}
-	if r.scope == ScopeGlobal && containsAgent(r.resolved.Agents, model.AgentOpenCode) && containsComponent(r.resolved.OrderedComponents, model.ComponentSDD) {
+	if tracksBundle {
 		prepare = append(prepare, managedBundlePrepareStep{homeDir: r.homeDir, state: r.state})
 	}
 
@@ -1847,6 +1851,14 @@ func executeTUIInstallWithBackground(homeDir string, selection model.Selection, 
 	runtime.piBackgroundProjection = preparePiBackgroundProjection(homeDir, &piBackgroundResolution, containsAgent(resolved.Agents, model.AgentPi))
 	orchestrator := pipeline.NewOrchestrator(pipeline.DefaultRollbackPolicy(), pipeline.WithFailurePolicy(pipeline.ContinueOnError), pipeline.WithProgressFunc(onProgress))
 	result := orchestrator.Execute(tuiInstallStagePlan(runtime))
+	if result.Err == nil && runtime.state.managedBundle != nil {
+		if err := runtime.state.managedBundle.VerifyAndCommit(AppVersion, ""); err != nil {
+			result.Err = fmt.Errorf("commit managed bundle transaction: %w", err)
+			if rollback := orchestrator.Rollback(result); rollback.Err != nil {
+				result.Err = errors.Join(result.Err, rollback.Err)
+			}
+		}
+	}
 	runtime.state.cleanupRollbackSnapshot()
 	if runtime.state.piCodeGraph != nil {
 		result.ManualActions = append(result.ManualActions, runtime.state.piCodeGraph.ManualActions...)

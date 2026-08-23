@@ -31,6 +31,7 @@ import (
 	"github.com/gentleman-programming/gentle-ai/v2/internal/components/sdd"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/components/skills"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/components/theme"
+	"github.com/gentleman-programming/gentle-ai/v2/internal/managedbundle"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/model"
 	opencodeactivation "github.com/gentleman-programming/gentle-ai/v2/internal/opencode"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/pipeline"
@@ -527,6 +528,10 @@ func newSyncRuntime(homeDir string, selection model.Selection) (*syncRuntime, er
 func (r *syncRuntime) stagePlan() pipeline.StagePlan {
 	adapters := resolveAdapters(r.agentIDs)
 	targets, targetErr := syncBackupTargets(r.homeDir, r.workspaceDir, r.selection, adapters)
+	tracksBundle := containsAgent(r.agentIDs, model.AgentOpenCode) && r.selection.HasComponent(model.ComponentSDD)
+	if tracksBundle {
+		targets = append(targets, managedbundle.ManifestPath(r.homeDir))
+	}
 	r.managedPaths = targets
 
 	prepare := []pipeline.Step{
@@ -543,7 +548,7 @@ func (r *syncRuntime) stagePlan() pipeline.StagePlan {
 			appVersion:  AppVersion,
 		},
 	}
-	if containsAgent(r.agentIDs, model.AgentOpenCode) && r.selection.HasComponent(model.ComponentSDD) {
+	if tracksBundle {
 		prepare = append(prepare, managedBundlePrepareStep{homeDir: r.homeDir, state: r.state})
 	}
 
