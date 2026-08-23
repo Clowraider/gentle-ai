@@ -12,6 +12,11 @@ import (
 
 const ManifestFile = ".gentle-ai/managed-bundle.json"
 
+const (
+	JournalSchemaV1 = "gentle-ai.managed-bundle-journal/v1"
+	JournalDir      = ".gentle-ai/transactions"
+)
+
 type BundleIdentity string
 
 const (
@@ -34,8 +39,36 @@ const (
 type Classification struct {
 	BundleIdentity  BundleIdentity
 	ExtentIntegrity ExtentIntegrity
+	RecoveryState   RecoveryState
 	SyncEligible    bool
 	Detail          string
+}
+
+type RecoveryState string
+
+const (
+	RecoveryNone             RecoveryState = "none"
+	RecoveryResumableBefore  RecoveryState = "resumable_before"
+	RecoveryResumableDesired RecoveryState = "resumable_desired"
+	RecoveryBlocked          RecoveryState = "blocked_conflict"
+)
+
+type JournalResource struct {
+	ResourceID    string `json:"resource_id"`
+	CanonicalPath string `json:"canonical_path"`
+	BeforeSHA256  string `json:"before_sha256"`
+	BeforeMode    uint32 `json:"before_mode"`
+	DesiredSHA256 string `json:"desired_sha256"`
+	DesiredMode   uint32 `json:"desired_mode"`
+}
+
+type Journal struct {
+	Schema             string            `json:"schema"`
+	TransactionID      string            `json:"transaction_id"`
+	ExpectedGeneration uint64            `json:"expected_generation"`
+	ProposedGeneration uint64            `json:"proposed_generation"`
+	Phase              string            `json:"phase"`
+	Resources          []JournalResource `json:"resources"`
 }
 
 func ManifestPath(homeDir string) string {
@@ -49,6 +82,9 @@ func ClassifyExtents(homeDir, version, revision string, descriptors []Descriptor
 	}
 	if manifest.Schema != ManifestSchemaV1 || len(manifest.Resources) != len(descriptors) || len(descriptors) == 0 {
 		return Classification{BundleIdentity: BundleUnknown, ExtentIntegrity: ExtentUnknown, Detail: "managed bundle manifest is unsupported or incomplete"}
+	}
+	if recovery, detail := classifyRecovery(homeDir, manifest); recovery != RecoveryNone {
+		return Classification{BundleIdentity: BundleUnknown, ExtentIntegrity: ExtentUnknown, RecoveryState: recovery, Detail: detail}
 	}
 
 	digest, err := Digest(descriptors)
@@ -104,6 +140,96 @@ func ClassifyExtents(homeDir, version, revision string, descriptors []Descriptor
 		return Classification{BundleIdentity: BundleUnknown, ExtentIntegrity: ExtentMatch, Detail: "managed bundle producer identity is incomplete"}
 	}
 	return Classification{BundleIdentity: BundleStale, ExtentIntegrity: ExtentMatch, SyncEligible: true, Detail: "managed bundle is a complete older installation; run `gentle-ai sync`"}
+}
+
+func classifyRecovery(homeDir string, manifest Manifest) (RecoveryState, string) {
+	root := filepath.Join(homeDir, filepath.FromSlash(JournalDir))
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return RecoveryNone, ""
+	}
+	if err != nil {
+		return RecoveryBlocked, fmt.Sprintf("read managed transaction directory: %v", err)
+	}
+	selected := RecoveryNone
+	for _, entry := range entries {
+		if !entry.IsDir() || !validTransactionID(entry.Name()) {
+			return RecoveryBlocked, "managed transaction entry is unsafe"
+		}
+		journal, err := readJournal(filepath.Join(root, entry.Name(), "journal.json"))
+		if err != nil || journal.Schema != JournalSchemaV1 || journal.TransactionID != entry.Name() || len(journal.Resources) == 0 {
+			return RecoveryBlocked, "managed transaction journal is malformed or unsupported"
+		}
+		if journal.Phase == "completed" || journal.Phase == "rolled_back" || manifest.TransactionID == journal.TransactionID {
+			continue
+		}
+		if journal.ExpectedGeneration != manifest.Generation || journal.ProposedGeneration != manifest.Generation+1 {
+			return RecoveryBlocked, "managed transaction generation does not match the committed manifest"
+		}
+		state := classifyJournalResources(homeDir, journal.Resources)
+		if state == RecoveryBlocked || selected != RecoveryNone && selected != state {
+			return RecoveryBlocked, "managed transaction extents conflict"
+		}
+		selected = state
+	}
+	if selected == RecoveryNone {
+		return RecoveryNone, ""
+	}
+	return selected, "managed transaction requires read-only recovery classification"
+}
+
+func classifyJournalResources(homeDir string, resources []JournalResource) RecoveryState {
+	allBefore, allDesired := true, true
+	for _, resource := range resources {
+		target, err := safeTarget(homeDir, resource.CanonicalPath)
+		if err != nil {
+			return RecoveryBlocked
+		}
+		info, err := os.Lstat(target)
+		if err != nil || !info.Mode().IsRegular() {
+			return RecoveryBlocked
+		}
+		content, err := os.ReadFile(target)
+		if err != nil {
+			return RecoveryBlocked
+		}
+		digest, mode := SHA256(content), uint32(info.Mode().Perm())
+		before := digest == resource.BeforeSHA256 && mode == resource.BeforeMode
+		desired := digest == resource.DesiredSHA256 && mode == resource.DesiredMode
+		allBefore, allDesired = allBefore && before, allDesired && desired
+		if !before && !desired {
+			return RecoveryBlocked
+		}
+	}
+	if allDesired {
+		return RecoveryResumableDesired
+	}
+	if allBefore {
+		return RecoveryResumableBefore
+	}
+	return RecoveryBlocked
+}
+
+func readJournal(path string) (Journal, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Journal{}, err
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder.DisallowUnknownFields()
+	var journal Journal
+	if err := decoder.Decode(&journal); err != nil {
+		return Journal{}, err
+	}
+	var extra any
+	if decoder.Decode(&extra) != io.EOF {
+		return Journal{}, errors.New("trailing journal data")
+	}
+	return journal, nil
+}
+
+func validTransactionID(id string) bool {
+	return id != "" && id != "." && id != ".." && filepath.Base(id) == id && !strings.ContainsAny(id, `/\\`)
 }
 
 func readManifest(homeDir string) (Manifest, error) {
