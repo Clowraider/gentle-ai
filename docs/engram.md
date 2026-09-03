@@ -152,13 +152,14 @@ engram sync --cloud --project <project-name> # test remote auth and initial sync
 
 ```bash
 engram cloud upgrade doctor --project <project-name>
+engram cloud upgrade repair --project <project-name> --dry-run
 engram cloud upgrade repair --project <project-name> --apply
 ```
 
 ### Reference
 
 - Engram cloud docs: [github.com/Gentleman-Programming/engram/blob/main/docs/engram-cloud/README.md](https://github.com/Gentleman-Programming/engram/blob/main/docs/engram-cloud/README.md)
-- The in-process background loop: `internal/cloud/autosync/manager.go` (engram source)
+- The in-process background loop: [`internal/cloud/autosync/manager.go`](https://github.com/Gentleman-Programming/engram/blob/main/internal/cloud/autosync/manager.go) (engram source)
 - Why this lives as a doc, not code, here: [docs/codebase/sync-and-cloud.md](codebase/sync-and-cloud.md)
 
 ---
