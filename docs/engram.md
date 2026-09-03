@@ -116,29 +116,34 @@ If you're working outside a git repo, engram falls back to the directory name.
 > This page shows the one-time setup; the engine itself is maintained upstream.
 >
 > - Useful if you want your memories to follow you between machines you own.
-> - Not needed for team sharing via your repo (`engram sync --commit` does that).
+> - Not needed for team sharing via your repo (see [Team Sharing](#team-sharing) above).
 > - Skip if you only ever work on one machine -- local memory is the default.
 
-### Pick your env-var carrier (persists across reboots)
+### Pick your env-var carrier
 
 | OS / setup                            | Mechanism                                       |
 |---------------------------------------|-------------------------------------------------|
-| macOS (LaunchAgents / GUI daemons)    | `launchctl setenv KEY VALUE`                    |
-| Linux (systemd user instance)         | `systemctl --user import-environment KEY=VALUE` |
-| Anywhere (only this shell's children) | `export KEY=VALUE` in `~/.zshrc` / `~/.bashrc`  |
+| macOS (current session / daemons)     | `launchctl setenv KEY VALUE`                    |
+| Linux (systemd user session)          | `systemctl --user set-environment KEY=VALUE`   |
+| Shell profile (terminal sessions)     | `export KEY=VALUE` in `~/.zshrc` / `~/.bashrc`  |
 
-### Three commands, one time
+### Setup commands
 
 ```bash
+# 1. Point engram to your cloud server
 engram cloud config --server https://your-cloud-server.example
-engram cloud config --token <your-token>     # or paste at the interactive prompt
-launchctl setenv ENGRAM_CLOUD_AUTOSYNC 1     # or your carrier from the table above
+
+# 2. Configure credentials and enable autosync (via env vars or shell profile)
+export ENGRAM_CLOUD_TOKEN="<your-token>"
+export ENGRAM_CLOUD_AUTOSYNC=1
 ```
+
+> Note: If `engram mcp` or `engram serve` is already running in your AI client, restart the agent session so it picks up the new environment variables.
 
 ### Verify
 
 ```bash
-engram cloud status                          # "Sync readiness: ready"
+engram cloud status                          # look for "Sync readiness: ready"
 engram cloud enroll <project-name>           # one-time, per project
 engram sync --cloud --project <project-name> # first push (the loop handles the rest)
 ```
