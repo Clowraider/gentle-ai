@@ -150,10 +150,12 @@ engram sync --cloud --project <project-name> # test remote auth and initial sync
 
 ### Troubleshooting
 
+Back up your local database (`~/.engram/engram.db`) before running repairs:
+
 ```bash
 engram cloud upgrade doctor --project <project-name>
-engram cloud upgrade repair --project <project-name> --dry-run
-engram cloud upgrade repair --project <project-name> --apply
+engram cloud upgrade repair --project <project-name> --dry-run  # preview changes
+engram cloud upgrade repair --project <project-name> --apply    # apply after reviewing preview
 ```
 
 ### Reference
