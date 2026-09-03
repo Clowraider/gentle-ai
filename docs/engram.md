@@ -143,9 +143,9 @@ export ENGRAM_CLOUD_AUTOSYNC=1
 ### Verify
 
 ```bash
-engram cloud status                          # look for "Sync readiness: ready"
+engram cloud status                          # check "Auth status: ready" and "Sync readiness: ready"
 engram cloud enroll <project-name>           # one-time, per project
-engram sync --cloud --project <project-name> # first push (the loop handles the rest)
+engram sync --cloud --project <project-name> # test remote auth and initial sync
 ```
 
 ### Troubleshooting
