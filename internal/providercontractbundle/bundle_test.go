@@ -316,14 +316,22 @@ func TestVerifyArchiveRejectsMismatchedRuntimeInventory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	canonical := reviewerprovider.RegisteredRuntimeIdentities()
+	if len(canonical) < 2 {
+		t.Fatalf("need at least 2 canonical runtimes for test, got %d", len(canonical))
+	}
+	reordered := slices.Clone(canonical)
+	reordered[0], reordered[1] = reordered[1], reordered[0]
+	unknown := append(slices.Clone(canonical), "unknown-runtime")
+
 	cases := []struct {
 		name     string
 		runtimes []string
 	}{
-		{name: "reordered runtimes", runtimes: []string{"codex", "claude-code", "opencode", "pi"}},
+		{name: "reordered runtimes", runtimes: reordered},
 		{name: "empty runtimes", runtimes: []string{}},
 		{name: "nil runtimes", runtimes: nil},
-		{name: "unknown runtime", runtimes: []string{"claude-code", "codex", "opencode", "pi", "unknown-runtime"}},
+		{name: "unknown runtime", runtimes: unknown},
 	}
 	for _, test := range cases {
 		archive := filepath.Join(t.TempDir(), "mismatched-runtimes.tar.gz")
