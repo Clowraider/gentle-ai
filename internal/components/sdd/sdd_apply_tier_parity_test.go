@@ -9,6 +9,9 @@ import (
 	"github.com/gentleman-programming/gentle-ai/v2/internal/model"
 )
 
+// TestSDDApplyTierParityAtRenderedInstalledBoundaries verifies that both capable and
+// small model capability tiers preserve the rules.apply phase-rule instruction in
+// rendered shared prompts and installed skill outputs without leaking section markers.
 func TestSDDApplyTierParityAtRenderedInstalledBoundaries(t *testing.T) {
 	const phaseRuleInstruction = "Apply any `rules.apply` from `openspec/config.yaml`"
 
