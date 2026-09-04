@@ -18,6 +18,9 @@ import (
 	"github.com/gentleman-programming/gentle-ai/v2/internal/reviewerprovider"
 )
 
+// TestGenerateIsDeterministicAndVerifiable verifies that Generate produces
+// deterministic manifest, schema, and vector contents matching canonical
+// references, including ordered runtime inventory and staging verification.
 func TestGenerateIsDeterministicAndVerifiable(t *testing.T) {
 	first := filepath.Join(t.TempDir(), "first")
 	second := filepath.Join(t.TempDir(), "second")
@@ -303,89 +306,38 @@ func TestVerifyArchiveRejectsOversizedPAXMetadata(t *testing.T) {
 	}
 }
 
+// TestVerifyArchiveRejectsMismatchedRuntimeInventory verifies that VerifyArchive
+// fails closed with errInvalidBundle whenever manifest runtimes are reordered,
+// empty, nil, or contain unknown runtime identities.
 func TestVerifyArchiveRejectsMismatchedRuntimeInventory(t *testing.T) {
 	files, err := generatedFiles("1.0.0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, test := range []struct {
-		name   string
-		mutate func([]byte) []byte
+		name     string
+		runtimes []string
 	}{
-		{
-			name: "reordered runtimes",
-			mutate: func(payload []byte) []byte {
-				var doc manifest
-				if err := json.Unmarshal(payload, &doc); err != nil {
-					t.Fatal(err)
-				}
-				if len(doc.Runtimes) < 2 {
-					t.Fatal("need at least 2 runtimes to test reordering")
-				}
-				doc.Runtimes[0], doc.Runtimes[1] = doc.Runtimes[1], doc.Runtimes[0]
-				tampered, err := json.MarshalIndent(doc, "", "  ")
-				if err != nil {
-					t.Fatal(err)
-				}
-				return append(tampered, '\n')
-			},
-		},
-		{
-			name: "empty runtimes",
-			mutate: func(payload []byte) []byte {
-				var doc manifest
-				if err := json.Unmarshal(payload, &doc); err != nil {
-					t.Fatal(err)
-				}
-				doc.Runtimes = []string{}
-				tampered, err := json.MarshalIndent(doc, "", "  ")
-				if err != nil {
-					t.Fatal(err)
-				}
-				return append(tampered, '\n')
-			},
-		},
-		{
-			name: "nil runtimes",
-			mutate: func(payload []byte) []byte {
-				var doc manifest
-				if err := json.Unmarshal(payload, &doc); err != nil {
-					t.Fatal(err)
-				}
-				doc.Runtimes = nil
-				tampered, err := json.MarshalIndent(doc, "", "  ")
-				if err != nil {
-					t.Fatal(err)
-				}
-				return append(tampered, '\n')
-			},
-		},
-		{
-			name: "unknown runtime",
-			mutate: func(payload []byte) []byte {
-				var doc manifest
-				if err := json.Unmarshal(payload, &doc); err != nil {
-					t.Fatal(err)
-				}
-				doc.Runtimes = append(doc.Runtimes, "unknown-runtime")
-				tampered, err := json.MarshalIndent(doc, "", "  ")
-				if err != nil {
-					t.Fatal(err)
-				}
-				return append(tampered, '\n')
-			},
-		},
+		{name: "reordered runtimes", runtimes: []string{"codex", "claude-code", "opencode", "pi"}},
+		{name: "empty runtimes", runtimes: []string{}},
+		{name: "nil runtimes", runtimes: nil},
+		{name: "unknown runtime", runtimes: []string{"claude-code", "codex", "opencode", "pi", "unknown-runtime"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			archive := filepath.Join(t.TempDir(), "mismatched-runtimes.tar.gz")
 			copyFiles := cloneFiles(files)
-			tampered := test.mutate(copyFiles["manifest.json"])
-			if bytes.Equal(tampered, copyFiles["manifest.json"]) {
-				t.Fatal("mutation did not alter manifest.json")
+			var doc manifest
+			if err := json.Unmarshal(copyFiles["manifest.json"], &doc); err != nil {
+				t.Fatal(err)
 			}
-			copyFiles["manifest.json"] = tampered
+			doc.Runtimes = test.runtimes
+			tampered, err := json.MarshalIndent(doc, "", "  ")
+			if err != nil {
+				t.Fatal(err)
+			}
+			copyFiles["manifest.json"] = append(tampered, '\n')
 			writeArchive(t, archive, copyFiles, nil, false)
-			err := VerifyArchive(archive)
+			err = VerifyArchive(archive)
 			if err == nil {
 				t.Fatal("VerifyArchive accepted manifest with mismatched runtime inventory")
 			}

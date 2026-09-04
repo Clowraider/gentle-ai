@@ -5,6 +5,9 @@ import (
 	"testing"
 )
 
+// TestRegisteredRuntimeIdentitiesStableLexicalOrder pins the registered
+// reviewer provider runtime identities to a non-empty, strictly sorted
+// lexical list so consumers can rely on deterministic order.
 func TestRegisteredRuntimeIdentitiesStableLexicalOrder(t *testing.T) {
 	identities := RegisteredRuntimeIdentities()
 	if len(identities) == 0 {
