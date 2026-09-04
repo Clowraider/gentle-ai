@@ -360,6 +360,8 @@ func TestCodeGraphGuidanceContainsLazyInitAndUsageRules(t *testing.T) {
 	}
 }
 
+// TestCodeGraphGuidanceInjectsForRepresentativeAgents verifies that CodeGraph guidance
+// is correctly injected into configuration files for representative supported agents.
 func TestCodeGraphGuidanceInjectsForRepresentativeAgents(t *testing.T) {
 	home := t.TempDir()
 	mustWrite(t, filepath.Join(home, ".config", "opencode", "opencode.json"), `{"agent":{"worker":{"prompt":"use codegraph_explore"}}}`)
