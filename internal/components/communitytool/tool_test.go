@@ -286,6 +286,8 @@ func TestInstallWithHomeReportsEffectiveMCPAdapterSchema(t *testing.T) {
 	}
 }
 
+// TestInstallWithHomeFailsClosedForEmptyPiSettingsWithoutMCPProcess verifies that
+// installation fails when Pi settings exist but the MCP process probe fails.
 func TestInstallWithHomeFailsClosedForEmptyPiSettingsWithoutMCPProcess(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("PATH", t.TempDir())
