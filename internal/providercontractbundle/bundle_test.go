@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -13,6 +14,8 @@ import (
 	"runtime"
 	"slices"
 	"testing"
+
+	"github.com/gentleman-programming/gentle-ai/v2/internal/reviewerprovider"
 )
 
 func TestGenerateIsDeterministicAndVerifiable(t *testing.T) {
@@ -57,6 +60,21 @@ func TestGenerateIsDeterministicAndVerifiable(t *testing.T) {
 		if info.Mode().Perm() != wantMode || !info.ModTime().Equal(bundleTimestamp) {
 			t.Fatalf("generated %s metadata = %s %s, want %04o %s", name, info.Mode(), info.ModTime(), wantMode, bundleTimestamp)
 		}
+	}
+	var decodedManifest manifest
+	if err := json.Unmarshal(firstFiles["manifest.json"], &decodedManifest); err != nil {
+		t.Fatalf("unmarshal generated manifest.json: %v", err)
+	}
+	if len(decodedManifest.Runtimes) == 0 {
+		t.Fatal("manifest.json has empty runtimes inventory, want non-empty")
+	}
+	for index := 1; index < len(decodedManifest.Runtimes); index++ {
+		if decodedManifest.Runtimes[index-1] >= decodedManifest.Runtimes[index] {
+			t.Fatalf("manifest.json runtimes is not strictly sorted: %q comes before %q", decodedManifest.Runtimes[index-1], decodedManifest.Runtimes[index])
+		}
+	}
+	if !slices.Equal(decodedManifest.Runtimes, reviewerprovider.RegisteredRuntimeIdentities()) {
+		t.Fatalf("manifest.json runtimes = %q, want %q", decodedManifest.Runtimes, reviewerprovider.RegisteredRuntimeIdentities())
 	}
 	if err := VerifyStaging(first); err != nil {
 		t.Fatalf("VerifyStaging(%s): %v", first, err)
@@ -282,6 +300,99 @@ func TestVerifyArchiveRejectsOversizedPAXMetadata(t *testing.T) {
 	}
 	if err := VerifyArchive(archive); err == nil {
 		t.Fatal("VerifyArchive accepted PAX metadata")
+	}
+}
+
+func TestVerifyArchiveRejectsMismatchedRuntimeInventory(t *testing.T) {
+	files, err := generatedFiles("1.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func([]byte) []byte
+	}{
+		{
+			name: "reordered runtimes",
+			mutate: func(payload []byte) []byte {
+				var doc manifest
+				if err := json.Unmarshal(payload, &doc); err != nil {
+					t.Fatal(err)
+				}
+				if len(doc.Runtimes) < 2 {
+					t.Fatal("need at least 2 runtimes to test reordering")
+				}
+				doc.Runtimes[0], doc.Runtimes[1] = doc.Runtimes[1], doc.Runtimes[0]
+				tampered, err := json.MarshalIndent(doc, "", "  ")
+				if err != nil {
+					t.Fatal(err)
+				}
+				return append(tampered, '\n')
+			},
+		},
+		{
+			name: "empty runtimes",
+			mutate: func(payload []byte) []byte {
+				var doc manifest
+				if err := json.Unmarshal(payload, &doc); err != nil {
+					t.Fatal(err)
+				}
+				doc.Runtimes = []string{}
+				tampered, err := json.MarshalIndent(doc, "", "  ")
+				if err != nil {
+					t.Fatal(err)
+				}
+				return append(tampered, '\n')
+			},
+		},
+		{
+			name: "nil runtimes",
+			mutate: func(payload []byte) []byte {
+				var doc manifest
+				if err := json.Unmarshal(payload, &doc); err != nil {
+					t.Fatal(err)
+				}
+				doc.Runtimes = nil
+				tampered, err := json.MarshalIndent(doc, "", "  ")
+				if err != nil {
+					t.Fatal(err)
+				}
+				return append(tampered, '\n')
+			},
+		},
+		{
+			name: "unknown runtime",
+			mutate: func(payload []byte) []byte {
+				var doc manifest
+				if err := json.Unmarshal(payload, &doc); err != nil {
+					t.Fatal(err)
+				}
+				doc.Runtimes = append(doc.Runtimes, "unknown-runtime")
+				tampered, err := json.MarshalIndent(doc, "", "  ")
+				if err != nil {
+					t.Fatal(err)
+				}
+				return append(tampered, '\n')
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			archive := filepath.Join(t.TempDir(), "mismatched-runtimes.tar.gz")
+			copyFiles := cloneFiles(files)
+			tampered := test.mutate(copyFiles["manifest.json"])
+			if bytes.Equal(tampered, copyFiles["manifest.json"]) {
+				t.Fatal("mutation did not alter manifest.json")
+			}
+			copyFiles["manifest.json"] = tampered
+			writeArchive(t, archive, copyFiles, nil, false)
+			err := VerifyArchive(archive)
+			if err == nil {
+				t.Fatal("VerifyArchive accepted manifest with mismatched runtime inventory")
+			}
+			if !errors.Is(err, errInvalidBundle) {
+				t.Fatalf("VerifyArchive returned %v, want errInvalidBundle", err)
+			}
+		})
 	}
 }
 
