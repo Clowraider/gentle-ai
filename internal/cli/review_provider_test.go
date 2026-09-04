@@ -7,6 +7,8 @@ import (
 	"github.com/gentleman-programming/gentle-ai/v2/internal/reviewerprovider"
 )
 
+// TestReviewProviderAdapterFor pins #3258: it covers reviewer provider adapter selection
+// and host-mediated or unregistered-adapter refusals across runtime identities.
 func TestReviewProviderAdapterFor(t *testing.T) {
 	contract, err := reviewerprovider.ContractFor(reviewerprovider.RoleLens)
 	if err != nil {
