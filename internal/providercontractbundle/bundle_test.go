@@ -287,6 +287,8 @@ func TestVerifyArchiveRejectsDamagedAndExpandedStreams(t *testing.T) {
 	}
 }
 
+// TestVerifyArchiveRejectsOversizedPAXMetadata verifies that VerifyArchive
+// rejects archives containing PAX extended headers exceeding size bounds.
 func TestVerifyArchiveRejectsOversizedPAXMetadata(t *testing.T) {
 	files, err := generatedFiles("1.0.0")
 	if err != nil {
@@ -314,7 +316,7 @@ func TestVerifyArchiveRejectsMismatchedRuntimeInventory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, test := range []struct {
+	cases := []struct {
 		name     string
 		runtimes []string
 	}{
@@ -322,32 +324,33 @@ func TestVerifyArchiveRejectsMismatchedRuntimeInventory(t *testing.T) {
 		{name: "empty runtimes", runtimes: []string{}},
 		{name: "nil runtimes", runtimes: nil},
 		{name: "unknown runtime", runtimes: []string{"claude-code", "codex", "opencode", "pi", "unknown-runtime"}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			archive := filepath.Join(t.TempDir(), "mismatched-runtimes.tar.gz")
-			copyFiles := cloneFiles(files)
-			var doc manifest
-			if err := json.Unmarshal(copyFiles["manifest.json"], &doc); err != nil {
-				t.Fatal(err)
-			}
-			doc.Runtimes = test.runtimes
-			tampered, err := json.MarshalIndent(doc, "", "  ")
-			if err != nil {
-				t.Fatal(err)
-			}
-			copyFiles["manifest.json"] = append(tampered, '\n')
-			writeArchive(t, archive, copyFiles, nil, false)
-			err = VerifyArchive(archive)
-			if err == nil {
-				t.Fatal("VerifyArchive accepted manifest with mismatched runtime inventory")
-			}
-			if !errors.Is(err, errInvalidBundle) {
-				t.Fatalf("VerifyArchive returned %v, want errInvalidBundle", err)
-			}
-		})
+	}
+	for _, test := range cases {
+		archive := filepath.Join(t.TempDir(), "mismatched-runtimes.tar.gz")
+		copyFiles := cloneFiles(files)
+		var doc manifest
+		if err := json.Unmarshal(copyFiles["manifest.json"], &doc); err != nil {
+			t.Fatal(err)
+		}
+		doc.Runtimes = test.runtimes
+		tampered, err := json.MarshalIndent(doc, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		copyFiles["manifest.json"] = append(tampered, '\n')
+		writeArchive(t, archive, copyFiles, nil, false)
+		err = VerifyArchive(archive)
+		if err == nil {
+			t.Fatalf("%s: VerifyArchive accepted manifest with mismatched runtime inventory", test.name)
+		}
+		if !errors.Is(err, errInvalidBundle) {
+			t.Fatalf("%s: VerifyArchive returned %v, want errInvalidBundle", test.name, err)
+		}
 	}
 }
 
+// TestReadContractSemverRejectsNonCanonicalInput verifies that ReadContractSemver
+// rejects semver values with non-canonical formatting.
 func TestReadContractSemverRejectsNonCanonicalInput(t *testing.T) {
 	filename := filepath.Join(t.TempDir(), "CONTRACT_SEMVER")
 	for _, value := range []string{"v1.0.0\n", "1.0\n", "01.0.0\n", "1.0.0"} {
