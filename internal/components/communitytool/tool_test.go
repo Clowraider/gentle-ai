@@ -302,6 +302,8 @@ func TestInstallWithHomeFailsClosedForEmptyPiSettingsWithoutMCPProcess(t *testin
 	}
 }
 
+// TestCodeGraphGuidanceContainsLazyInitAndUsageRules verifies that the CodeGraph
+// guidance block contains mandatory ordering, initialization, and worktree placement rules.
 func TestCodeGraphGuidanceContainsLazyInitAndUsageRules(t *testing.T) {
 	guidance := CodeGraphGuidanceMarkdown()
 	for _, want := range []string{
