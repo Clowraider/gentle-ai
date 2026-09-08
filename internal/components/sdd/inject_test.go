@@ -2782,6 +2782,22 @@ func TestInjectOpenCodeMultiMode(t *testing.T) {
 		t.Fatalf("gentle-orchestrator emits deprecated tools: %#v", orchestratorAgent)
 	}
 
+	permissionRaw, ok := orchestratorAgent["permission"].(map[string]any)
+	if !ok {
+		t.Fatalf("gentle-orchestrator permission has unexpected type: %T", orchestratorAgent["permission"])
+	}
+	taskRaw, ok := permissionRaw["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("gentle-orchestrator permission.task has unexpected type: %T", permissionRaw["task"])
+	}
+	taskAllowlist := taskRaw
+	if taskReplace, ok := taskRaw["__replace__"].(map[string]any); ok {
+		taskAllowlist = taskReplace
+	}
+	if got := taskAllowlist["design-minimality"]; got != "allow" {
+		t.Fatalf("gentle-orchestrator permission.task[design-minimality] = %v, want allow", got)
+	}
+
 	// Verify representative sub-agents are present.
 	for _, subAgent := range []string{"sdd-init", "sdd-apply", "sdd-verify", "sdd-explore", "sdd-research", "sdd-propose", "sdd-spec", "sdd-design", "sdd-tasks", "sdd-archive", "jd-judge-a", "jd-judge-b", "jd-fix-agent", "review-risk", "review-readability", "review-reliability", "review-resilience", "review-refuter", "review-validator"} {
 		if _, ok := agentMap[subAgent]; !ok {
