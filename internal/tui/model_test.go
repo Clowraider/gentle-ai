@@ -8214,7 +8214,6 @@ func TestInitializeModelPickerWorkingDirectoryFailureShowsDiscoveryFallback(t *t
 }
 
 func TestRuntimeCatalogDiscoveryIgnoresStaleProjectResults(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	originalDiscover := modelPickerCatalogDiscoverer
 	originalDir := modelPickerWorkingDir
 	originalSettingsPath := modelPickerSettingsPath

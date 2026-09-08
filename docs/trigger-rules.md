@@ -32,7 +32,7 @@ The file counts describe the context needed for the current action, not a risk
 score and not an SDD threshold. Risk may strengthen native verification or
 review, but it never forces SDD.
 
-Delegation also applies per action. For delegated direct implementation, follow the 3-step sequence: exploration -> design-minimality pass -> writer brief. Exploration maps context and execution paths; the design-minimality pass evaluates the minimality ladder, estimates authored footprint, and logs deliberate deferrals; and the resulting minimal plan is handed to the writer as its brief. Tests, builds, installs, and native review
+Delegation also applies per action. For delegated direct implementation, follow the 3-step sequence: exploration -> design-minimality pass -> writer brief. Exploration maps context and execution paths; the design-minimality pass evaluates the minimality ladder, estimates authored footprint, logs deliberate deferrals, and defines required tests and boundary invariants; and the resulting complete minimal plan and constraints are handed to the writer as its brief. Tests, builds, installs, and native review
 actors may use fresh workers without changing the implementation route or
 creating an SDD run. Direct and delegated work create no SDD artifacts, phase
 attempts, or synthetic SDD lifecycle.
