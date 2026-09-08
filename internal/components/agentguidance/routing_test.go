@@ -73,6 +73,9 @@ func TestRenderRoutingSucceedsForEverySupportedAgent(t *testing.T) {
 				"Optional SDD",
 				"Design-minimality pass",
 				"minimality ladder",
+				"deliberate deferrals",
+				"required tests",
+				"boundary invariants",
 			} {
 				if !strings.Contains(rendered, want) {
 					t.Fatalf("RenderRouting(%q) is missing %q:\n%s", agent.ID, want, rendered)
