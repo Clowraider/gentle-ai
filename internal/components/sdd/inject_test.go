@@ -2735,10 +2735,10 @@ func TestInjectOpenCodeMultiMode(t *testing.T) {
 		t.Fatalf("agent key has unexpected type: %T", agentRaw)
 	}
 
-	// Multi overlay must contain gentle-orchestrator + 2 native fallback agents +
-	// 11 SDD sub-agents + 3 JD agents + 4 review agents + refuter + validator = 23 agents.
-	if len(agentMap) != 23 {
-		t.Fatalf("agent count = %d, want 23", len(agentMap))
+	// Multi overlay must contain gentle-orchestrator + 3 native fallback agents +
+	// 11 SDD sub-agents + 3 JD agents + 4 review agents + refuter + validator = 24 agents.
+	if len(agentMap) != 24 {
+		t.Fatalf("agent count = %d, want 24", len(agentMap))
 	}
 
 	// Verify gentle-orchestrator is present.
@@ -3102,13 +3102,13 @@ func TestInjectOpenCodeEmptySDDModeDefaultsSingle(t *testing.T) {
 		t.Fatalf("agent key has unexpected type: %T", agentRaw)
 	}
 
-	// Empty mode defaults to single — gentle-orchestrator + 2 native fallback agents +
-	// 11 SDD sub-agents + 3 JD agents + 4 review agents + refuter + validator = 23 agents.
+	// Empty mode defaults to single — gentle-orchestrator + 3 native fallback agents +
+	// 11 SDD sub-agents + 3 JD agents + 4 review agents + refuter + validator = 24 agents.
 	if _, ok := agentMap["gentle-orchestrator"]; !ok {
 		t.Fatal("missing gentle-orchestrator agent")
 	}
-	if len(agentMap) != 23 {
-		t.Fatalf("agent count = %d, want 23", len(agentMap))
+	if len(agentMap) != 24 {
+		t.Fatalf("agent count = %d, want 24", len(agentMap))
 	}
 
 	// Verify orchestrator mode is "primary".
