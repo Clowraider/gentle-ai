@@ -66,13 +66,9 @@ func driveUntrackedInventoryRecoveryLoop(r *journeyRun) error {
 		"--request-id", settleRequestID, "--outcome", "failed", "--evidence-revision", sddFailedEvidence,
 	}, sddTerminalEvidence...)
 
-	type refusalResult struct {
-		State, Reason, Exit string
-	}
-
 	// Undeclared settlement must refuse with blocked(undeclared_untracked).
 	undeclared := r.run(settleBase, false)
-	var undeclaredRefusal refusalResult
+	var undeclaredRefusal sddCompactAttemptResult
 	if err := json.Unmarshal([]byte(undeclared.Stdout), &undeclaredRefusal); err != nil || undeclaredRefusal.State != "blocked" || undeclaredRefusal.Reason != "undeclared_untracked" {
 		return fmt.Errorf("#4040 undeclared settle did not refuse with undeclared_untracked: %#v parse=%v exit=%d", undeclaredRefusal, err, undeclared.ExitCode)
 	}
@@ -107,7 +103,7 @@ func driveUntrackedInventoryRecoveryLoop(r *journeyRun) error {
 		"--intended-untracked", untrackedRecoveryLoopCandidatePath,
 		"--expected-untracked-inventory", staleDigest,
 	), false)
-	var staleRefusal refusalResult
+	var staleRefusal sddCompactAttemptResult
 	if err := json.Unmarshal([]byte(stale.Stdout), &staleRefusal); err != nil || staleRefusal.State != "blocked" || staleRefusal.Reason != "undeclared_untracked" {
 		return fmt.Errorf("#4040 stale settle did not refuse with undeclared_untracked: %#v parse=%v exit=%d", staleRefusal, err, stale.ExitCode)
 	}
@@ -125,7 +121,7 @@ func driveUntrackedInventoryRecoveryLoop(r *journeyRun) error {
 		"--intended-untracked", untrackedRecoveryLoopCandidatePath,
 		"--expected-untracked-inventory", refreshed.EligibleUntrackedInventory,
 	), false)
-	var deletedRefusal refusalResult
+	var deletedRefusal sddCompactAttemptResult
 	if err := json.Unmarshal([]byte(deleted.Stdout), &deletedRefusal); err != nil || deletedRefusal.State != "blocked" || deletedRefusal.Reason != "undeclared_untracked" {
 		return fmt.Errorf("#4040 deleted path settle did not refuse: %#v parse=%v exit=%d", deletedRefusal, err, deleted.ExitCode)
 	}

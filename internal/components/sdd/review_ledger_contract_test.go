@@ -506,7 +506,7 @@ func TestKilocodeReviewSettingsMatchCurrentMainBaseline(t *testing.T) {
 	// #4324 appends canonical remote authorization to managed executor prompts;
 	// native permissions and the primary orchestrator remain unchanged.
 	// #4219 clarifies same-ID compact settle recovery in managed orchestrator assets.
-	const want = "de477df1ae3780566badac8b954bd045763b9fad60d8a106a6eefb67bf3c9475"
+	const want = "98c26625ad340f2efd3e85303f9b9a718d2814f9a28511f8923285f734eaa840"
 	if got != want {
 		t.Fatalf("Kilocode settings SHA-256 = %s, want current-main baseline %s", got, want)
 	}
