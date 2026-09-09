@@ -97,3 +97,51 @@ func TestSettlementInventoryReadFailureClassifiesCandidateUnavailable(t *testing
 		t.Fatalf("inventory read failure %v does not carry ErrRuntimeCandidateUnavailable", err)
 	}
 }
+
+func TestSettlementUntrackedSelectionRefusalGuidanceAvoidsReviewStatus(t *testing.T) {
+	repo := initRuntimeLedgerRepo(t)
+	if err := os.WriteFile(filepath.Join(repo, "born.txt"), []byte("born\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	_, digest, err := (reviewtransaction.SnapshotBuilder{Repo: repo}).IntendedUntrackedInventory(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleDigest := "sha256:" + strings.Repeat("0", 64)
+	selection := func(paths ...string) *[]string { return &paths }
+	store := RuntimeStore{Repo: repo}
+
+	// 1. Stale inventory refusal
+	_, _, err = store.settlementUntrackedSelection(ctx, RuntimeAttempt{EligibleUntrackedInventory: staleDigest}, FinishAttemptRequest{
+		IntendedUntracked: selection("born.txt"), ExpectedUntrackedInventory: staleDigest,
+	})
+	if err == nil {
+		t.Fatal("expected stale inventory to refuse")
+	}
+	staleMsg := err.Error()
+	if strings.Contains(staleMsg, "gentle-ai review status --next-transition") {
+		t.Fatalf("stale refusal routed through Review STATUS: %q", staleMsg)
+	}
+	if !strings.Contains(staleMsg, "retry `gentle-ai sdd-attempt settle` with the same --request-id") {
+		t.Fatalf("stale refusal missing same-request-id guidance: %q", staleMsg)
+	}
+	if !strings.Contains(staleMsg, digest) {
+		t.Fatalf("stale refusal missing fresh inventory digest %s: %q", digest, staleMsg)
+	}
+
+	// 2. Ineligible path refusal
+	_, _, err = store.settlementUntrackedSelection(ctx, RuntimeAttempt{EligibleUntrackedInventory: digest}, FinishAttemptRequest{
+		IntendedUntracked: selection("missing.txt"), ExpectedUntrackedInventory: digest,
+	})
+	if err == nil {
+		t.Fatal("expected missing path to refuse")
+	}
+	ineligibleMsg := err.Error()
+	if strings.Contains(ineligibleMsg, "gentle-ai review status --next-transition") {
+		t.Fatalf("ineligible path refusal routed through Review STATUS: %q", ineligibleMsg)
+	}
+	if !strings.Contains(ineligibleMsg, "retry `gentle-ai sdd-attempt settle` or rerun `gentle-ai sdd-attempt finish` with only eligible paths") {
+		t.Fatalf("ineligible path refusal missing eligible-paths guidance: %q", ineligibleMsg)
+	}
+}
