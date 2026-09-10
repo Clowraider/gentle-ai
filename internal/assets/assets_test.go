@@ -2265,7 +2265,7 @@ func TestSDDStatusContractSpecifiesSameIDUntrackedSettleRecovery(t *testing.T) {
 	}
 
 	for name, content := range map[string]string{
-		"sdd-status-contract.md":        status,
+		"sdd-status-contract.md":       status,
 		"sdd-orchestrator-sections.md": orchestrator,
 	} {
 		if !strings.Contains(strings.ToLower(content), "a successful settlement commits its request record so any replay with that id must be an exact idempotent replay") {
