@@ -1,11 +1,16 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -26,6 +31,23 @@ var sdd4040SettleCapability = &Capability{
 
 var untrackedRecoveryLoopDigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
+func untrackedInventoryDigest(paths ...string) string {
+	sort.Strings(paths)
+	hash := sha256.New()
+	writeLengthPrefixed(hash, []byte("gentle-ai.intended-untracked-inventory/v1"))
+	for _, path := range paths {
+		writeLengthPrefixed(hash, []byte(path))
+	}
+	return "sha256:" + hex.EncodeToString(hash.Sum(nil))
+}
+
+func writeLengthPrefixed(w io.Writer, value []byte) {
+	_, _ = w.Write([]byte(strconv.Itoa(len(value))))
+	_, _ = w.Write([]byte{0})
+	_, _ = w.Write(value)
+	_, _ = w.Write([]byte{0})
+}
+
 // driveUntrackedInventoryRecoveryLoop reproduces issues #4040 and #4219:
 // driving stale compact settle refusal through successful same-ID retry with
 // a non-empty retained selection, without routing through Review STATUS.
@@ -34,13 +56,9 @@ func driveUntrackedInventoryRecoveryLoop(r *journeyRun) error {
 		return err
 	}
 
-	review, err := readStatusForContract(r, reviewContractV2)
-	if err != nil {
-		return err
-	}
-	initialDigest := review.EligibleUntrackedInventory
+	initialDigest := untrackedInventoryDigest(untrackedRecoveryLoopRetainedPath)
 	if !untrackedRecoveryLoopDigestPattern.MatchString(initialDigest) {
-		return fmt.Errorf("#4040 initial STATUS did not publish eligible_untracked_inventory: %q", initialDigest)
+		return fmt.Errorf("#4040 initial digest invalid: %q", initialDigest)
 	}
 
 	acquire := r.run([]string{
@@ -73,12 +91,8 @@ func driveUntrackedInventoryRecoveryLoop(r *journeyRun) error {
 		return fmt.Errorf("#4040 undeclared settle did not refuse with undeclared_untracked: %#v parse=%v exit=%d", undeclaredRefusal, err, undeclared.ExitCode)
 	}
 
-	// Capture the inventory while both files exist.
-	reviewWithBorn, err := readStatusForContract(r, reviewContractV2)
-	if err != nil {
-		return err
-	}
-	staleDigest := reviewWithBorn.EligibleUntrackedInventory
+	// Stale digest computed while both files exist.
+	staleDigest := untrackedInventoryDigest(untrackedRecoveryLoopRetainedPath, untrackedRecoveryLoopCandidatePath)
 	if !untrackedRecoveryLoopDigestPattern.MatchString(staleDigest) || staleDigest == initialDigest {
 		return fmt.Errorf("#4040 inventory with born file = %q, want distinct from %q", staleDigest, initialDigest)
 	}
@@ -86,14 +100,6 @@ func driveUntrackedInventoryRecoveryLoop(r *journeyRun) error {
 	// Remove the born-during file.
 	if err := os.Remove(filepath.Join(r.sandbox.Repo, untrackedRecoveryLoopCandidatePath)); err != nil {
 		return err
-	}
-
-	refreshed, err := readStatusForContract(r, reviewContractV2)
-	if err != nil {
-		return err
-	}
-	if refreshed.EligibleUntrackedInventory != initialDigest {
-		return fmt.Errorf("#4040 refreshed digest = %q, want %q", refreshed.EligibleUntrackedInventory, initialDigest)
 	}
 
 	// Stale settle attempt with same request ID: must refuse, disclose fresh
@@ -110,16 +116,34 @@ func driveUntrackedInventoryRecoveryLoop(r *journeyRun) error {
 	if strings.Contains(staleRefusal.Exit, "gentle-ai review status --next-transition") {
 		return fmt.Errorf("#4040 stale settle refusal routed to Review STATUS: %s", staleRefusal.Exit)
 	}
-	if !strings.Contains(staleRefusal.Exit, "--expected-untracked-inventory="+refreshed.EligibleUntrackedInventory) ||
-		!strings.Contains(staleRefusal.Exit, "retry `gentle-ai sdd-attempt settle` with the same --request-id") {
-		return fmt.Errorf("#4040 stale settle refusal did not name same-ID retry with fresh digest: %s", staleRefusal.Exit)
+
+	// Extract the fresh digest directly from the compact refusal.
+	const freshDigestFlagPrefix = "--expected-untracked-inventory="
+	freshDigestIndex := strings.Index(staleRefusal.Exit, freshDigestFlagPrefix)
+	if freshDigestIndex == -1 {
+		return fmt.Errorf("#4040 stale settle refusal missing %q: %s", freshDigestFlagPrefix, staleRefusal.Exit)
+	}
+	candidateDigest := staleRefusal.Exit[freshDigestIndex+len(freshDigestFlagPrefix):]
+	const digestLen = len("sha256:") + 64
+	if len(candidateDigest) < digestLen {
+		return fmt.Errorf("#4040 stale settle refusal digest field too short: %s", staleRefusal.Exit)
+	}
+	freshDigest := candidateDigest[:digestLen]
+	if !untrackedRecoveryLoopDigestPattern.MatchString(freshDigest) {
+		return fmt.Errorf("#4040 stale settle refusal did not name a valid sha256 inventory digest: %s", staleRefusal.Exit)
+	}
+	if freshDigest != initialDigest {
+		return fmt.Errorf("#4040 fresh digest from refusal = %q, want %q", freshDigest, initialDigest)
+	}
+	if !strings.Contains(staleRefusal.Exit, "retry `gentle-ai sdd-attempt settle` with the same --request-id") {
+		return fmt.Errorf("#4040 stale settle refusal did not name same-ID retry: %s", staleRefusal.Exit)
 	}
 
 	// Ineligible path settle: must refuse without routing to Review STATUS.
 	deleted := r.run(append(append([]string{}, settleBase...),
 		"--untracked-scope", "select", "--intended-untracked", untrackedRecoveryLoopRetainedPath,
 		"--intended-untracked", untrackedRecoveryLoopCandidatePath,
-		"--expected-untracked-inventory", refreshed.EligibleUntrackedInventory,
+		"--expected-untracked-inventory", freshDigest,
 	), false)
 	var deletedRefusal sddCompactAttemptResult
 	if err := json.Unmarshal([]byte(deleted.Stdout), &deletedRefusal); err != nil || deletedRefusal.State != "blocked" || deletedRefusal.Reason != "undeclared_untracked" {
@@ -142,7 +166,7 @@ func driveUntrackedInventoryRecoveryLoop(r *journeyRun) error {
 	// Successful same-ID compact settle retry with non-empty retained selection.
 	recovered := r.run(append(append([]string{}, settleBase...),
 		"--untracked-scope", "select", "--intended-untracked", untrackedRecoveryLoopRetainedPath,
-		"--expected-untracked-inventory", refreshed.EligibleUntrackedInventory,
+		"--expected-untracked-inventory", freshDigest,
 	), false)
 	var recoveredResult sddCompactAttemptResult
 	if err := json.Unmarshal([]byte(recovered.Stdout), &recoveredResult); err != nil || recovered.ExitCode != 0 || (recoveredResult.State != "proceed" && recoveredResult.State != "complete") {
@@ -162,6 +186,13 @@ func driveUntrackedInventoryRecoveryLoop(r *journeyRun) error {
 	if final.ActiveAttempt != nil || len(final.Attempts) != 1 || final.Attempts[0].Outcome != "failed" ||
 		len(final.Attempts[0].IntendedUntracked) != 1 || final.Attempts[0].IntendedUntracked[0] != untrackedRecoveryLoopRetainedPath {
 		return fmt.Errorf("#4040 recovered settle did not account retained untracked selection: %#v", final)
+	}
+
+	// Assert that the recovery flow does not consult Review STATUS.
+	for _, record := range r.accumulator.records {
+		if len(record.Args) >= 2 && record.Args[0] == "review" && record.Args[1] == "status" {
+			return fmt.Errorf("#4040 recovery consulted Review STATUS: %v", record.Args)
+		}
 	}
 	return nil
 }
