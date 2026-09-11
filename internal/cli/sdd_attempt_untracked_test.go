@@ -649,16 +649,7 @@ func TestRunSDDAttemptSettleSameIDUntrackedRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	status, err := store.Status()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if status.ActiveAttempt != nil {
-		t.Fatalf("active attempt still present after successful settlement: %#v", status.ActiveAttempt)
-	}
-	if len(status.Attempts) != 1 {
-		t.Fatalf("settled attempts count = %d, want 1", len(status.Attempts))
-	}
-	if !slices.Contains(status.Attempts[0].IntendedUntracked, "born.txt") {
-		t.Fatalf("settled attempt missing retained untracked selection: %#v", status.Attempts[0].IntendedUntracked)
+	if err != nil || status.ActiveAttempt != nil || len(status.Attempts) != 1 || !slices.Contains(status.Attempts[0].IntendedUntracked, "born.txt") {
+		t.Fatalf("unexpected post-settle status: %#v err=%v", status, err)
 	}
 }

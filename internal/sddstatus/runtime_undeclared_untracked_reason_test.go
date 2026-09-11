@@ -112,36 +112,37 @@ func TestSettlementUntrackedSelectionRefusalGuidanceAvoidsReviewStatus(t *testin
 	selection := func(paths ...string) *[]string { return &paths }
 	store := RuntimeStore{Repo: repo}
 
-	// 1. Stale inventory refusal
-	_, _, err = store.settlementUntrackedSelection(ctx, RuntimeAttempt{EligibleUntrackedInventory: staleDigest}, FinishAttemptRequest{
-		IntendedUntracked: selection("born.txt"), ExpectedUntrackedInventory: staleDigest,
-	})
-	if err == nil {
-		t.Fatal("expected stale inventory to refuse")
-	}
-	staleMsg := err.Error()
-	if strings.Contains(staleMsg, "gentle-ai review status --next-transition") {
-		t.Fatalf("stale refusal routed through Review STATUS: %q", staleMsg)
-	}
-	if !strings.Contains(staleMsg, "retry `gentle-ai sdd-attempt settle` with the same --request-id") {
-		t.Fatalf("stale refusal missing same-request-id guidance: %q", staleMsg)
-	}
-	if !strings.Contains(staleMsg, digest) {
-		t.Fatalf("stale refusal missing fresh inventory digest %s: %q", digest, staleMsg)
-	}
-
-	// 2. Ineligible path refusal
-	_, _, err = store.settlementUntrackedSelection(ctx, RuntimeAttempt{EligibleUntrackedInventory: digest}, FinishAttemptRequest{
-		IntendedUntracked: selection("missing.txt"), ExpectedUntrackedInventory: digest,
-	})
-	if err == nil {
-		t.Fatal("expected missing path to refuse")
-	}
-	ineligibleMsg := err.Error()
-	if strings.Contains(ineligibleMsg, "gentle-ai review status --next-transition") {
-		t.Fatalf("ineligible path refusal routed through Review STATUS: %q", ineligibleMsg)
-	}
-	if !strings.Contains(ineligibleMsg, "retry `gentle-ai sdd-attempt settle` or rerun `gentle-ai sdd-attempt finish` with only eligible paths") {
-		t.Fatalf("ineligible path refusal missing eligible-paths guidance: %q", ineligibleMsg)
+	for _, tc := range []struct {
+		name    string
+		active  RuntimeAttempt
+		request FinishAttemptRequest
+		want    []string
+	}{
+		{
+			name:    "stale inventory",
+			active:  RuntimeAttempt{EligibleUntrackedInventory: staleDigest},
+			request: FinishAttemptRequest{IntendedUntracked: selection("born.txt"), ExpectedUntrackedInventory: staleDigest},
+			want:    []string{"retry `gentle-ai sdd-attempt settle` with the same --request-id", digest},
+		},
+		{
+			name:    "ineligible path",
+			active:  RuntimeAttempt{EligibleUntrackedInventory: digest},
+			request: FinishAttemptRequest{IntendedUntracked: selection("missing.txt"), ExpectedUntrackedInventory: digest},
+			want:    []string{"retry `gentle-ai sdd-attempt settle` or rerun `gentle-ai sdd-attempt finish` with only eligible paths"},
+		},
+	} {
+		_, _, err := store.settlementUntrackedSelection(ctx, tc.active, tc.request)
+		if err == nil {
+			t.Fatalf("%s: expected refusal", tc.name)
+		}
+		msg := err.Error()
+		if strings.Contains(msg, "gentle-ai review status --next-transition") {
+			t.Fatalf("%s: refusal routed through Review STATUS: %q", tc.name, msg)
+		}
+		for _, w := range tc.want {
+			if !strings.Contains(msg, w) {
+				t.Fatalf("%s: refusal missing %q: %q", tc.name, w, msg)
+			}
+		}
 	}
 }

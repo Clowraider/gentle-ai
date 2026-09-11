@@ -5,12 +5,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -34,18 +32,10 @@ var untrackedRecoveryLoopDigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64
 func untrackedInventoryDigest(paths ...string) string {
 	sort.Strings(paths)
 	hash := sha256.New()
-	writeLengthPrefixed(hash, []byte("gentle-ai.intended-untracked-inventory/v1"))
-	for _, path := range paths {
-		writeLengthPrefixed(hash, []byte(path))
+	for _, s := range append([]string{"gentle-ai.intended-untracked-inventory/v1"}, paths...) {
+		_, _ = fmt.Fprintf(hash, "%d\x00%s\x00", len(s), s)
 	}
 	return "sha256:" + hex.EncodeToString(hash.Sum(nil))
-}
-
-func writeLengthPrefixed(w io.Writer, value []byte) {
-	_, _ = w.Write([]byte(strconv.Itoa(len(value))))
-	_, _ = w.Write([]byte{0})
-	_, _ = w.Write(value)
-	_, _ = w.Write([]byte{0})
 }
 
 // driveUntrackedInventoryRecoveryLoop reproduces issues #4040 and #4219:
@@ -119,20 +109,12 @@ func driveUntrackedInventoryRecoveryLoop(r *journeyRun) error {
 
 	// Extract the fresh digest directly from the compact refusal.
 	const freshDigestFlagPrefix = "--expected-untracked-inventory="
-	freshDigestIndex := strings.Index(staleRefusal.Exit, freshDigestFlagPrefix)
-	if freshDigestIndex == -1 {
-		return fmt.Errorf("#4040 stale settle refusal missing %q: %s", freshDigestFlagPrefix, staleRefusal.Exit)
+	idx := strings.Index(staleRefusal.Exit, freshDigestFlagPrefix)
+	if idx == -1 || len(staleRefusal.Exit) < idx+len(freshDigestFlagPrefix)+71 {
+		return fmt.Errorf("#4040 stale settle refusal missing valid digest flag: %s", staleRefusal.Exit)
 	}
-	candidateDigest := staleRefusal.Exit[freshDigestIndex+len(freshDigestFlagPrefix):]
-	const digestLen = len("sha256:") + 64
-	if len(candidateDigest) < digestLen {
-		return fmt.Errorf("#4040 stale settle refusal digest field too short: %s", staleRefusal.Exit)
-	}
-	freshDigest := candidateDigest[:digestLen]
-	if !untrackedRecoveryLoopDigestPattern.MatchString(freshDigest) {
-		return fmt.Errorf("#4040 stale settle refusal did not name a valid sha256 inventory digest: %s", staleRefusal.Exit)
-	}
-	if freshDigest != initialDigest {
+	freshDigest := staleRefusal.Exit[idx+len(freshDigestFlagPrefix) : idx+len(freshDigestFlagPrefix)+71]
+	if !untrackedRecoveryLoopDigestPattern.MatchString(freshDigest) || freshDigest != initialDigest {
 		return fmt.Errorf("#4040 fresh digest from refusal = %q, want %q", freshDigest, initialDigest)
 	}
 	if !strings.Contains(staleRefusal.Exit, "retry `gentle-ai sdd-attempt settle` with the same --request-id") {
