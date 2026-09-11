@@ -1,6 +1,7 @@
 package agentbuilder
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,9 @@ import (
 )
 
 var saveRegistry = SaveRegistry
+
+// ErrAgentNotFound indicates that the requested agent name does not exist in the custom agent registry.
+var ErrAgentNotFound = errors.New("agent not found in registry")
 
 // UninstallResult captures the backend uninstall outcome for one custom agent.
 type UninstallResult struct {
@@ -41,7 +45,7 @@ func Uninstall(registryPath, agentName, homeDir string) (UninstallResult, error)
 
 	entry := registry.FindByName(agentName)
 	if entry == nil {
-		return UninstallResult{}, fmt.Errorf("uninstall: agent %q not found in registry", agentName)
+		return UninstallResult{}, fmt.Errorf("uninstall: %w: %q", ErrAgentNotFound, agentName)
 	}
 
 	targetName := entry.Name

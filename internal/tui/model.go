@@ -2440,24 +2440,17 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 			home := homeDir()
 			registryPath := customAgentsRegistryPath()
 			_, err := agentbuilder.Uninstall(registryPath, m.CustomAgentDeleteTarget, home)
-			if err != nil {
-				reg, loadErr := agentbuilder.LoadRegistry(registryPath)
-				if loadErr == nil && reg.FindByName(m.CustomAgentDeleteTarget) == nil {
-					m.CustomAgentsErr = nil
-					m.loadCustomAgents()
-					m.setScreen(ScreenCustomAgents)
-					return m, nil
-				}
-				m.CustomAgentsErr = err
-				m.setScreen(ScreenCustomAgents)
-				return m, nil
-			}
-
-			m.CustomAgentsErr = nil
-			m.loadCustomAgents()
 			m.setScreen(ScreenCustomAgents)
+			if err != nil && !errors.Is(err, agentbuilder.ErrAgentNotFound) {
+				m.CustomAgentsErr = err
+			} else {
+				m.CustomAgentsErr = nil
+			}
+			m.CustomAgentDeleteTarget = ""
+			return m, nil
 		default: // "Cancel"
 			m.setScreen(ScreenCustomAgents)
+			m.CustomAgentDeleteTarget = ""
 		}
 		return m, nil
 	case ScreenModelConfig:

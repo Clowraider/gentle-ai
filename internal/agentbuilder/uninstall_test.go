@@ -1,6 +1,7 @@
 package agentbuilder
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -394,5 +395,17 @@ func TestUninstall_SymlinkedSkillDirDoesNotDeleteOutsideTarget(t *testing.T) {
 
 	if len(result.RemovedPaths) != 1 || result.RemovedPaths[0] != skillLink {
 		t.Fatalf("RemovedPaths = %v, want [%s]", result.RemovedPaths, skillLink)
+	}
+}
+
+func TestUninstall_AgentNotFound(t *testing.T) {
+	home := t.TempDir()
+	regPath := writeRegistryForUninstall(t, home)
+	_, err := Uninstall(regPath, "nonexistent-agent", home)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrAgentNotFound) {
+		t.Fatalf("expected errors.Is(err, ErrAgentNotFound), got %v", err)
 	}
 }

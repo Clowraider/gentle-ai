@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -195,6 +196,15 @@ func TestCustomAgents_DeleteTargetRemovedExternally(t *testing.T) {
 func TestCustomAgents_CreateNewAgentNavigatesToBuilder(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
+	binDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(binDir, "claude"), []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatalf("WriteFile fakeClaude: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "claude.bat"), []byte("@echo off\nexit /b 0\n"), 0755); err != nil {
+		t.Fatalf("WriteFile fakeClaude.bat: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
 	m := NewModel(system.DetectionResult{}, "dev")
 	m.AgentBuilder.AvailableEngines = []model.AgentID{model.AgentClaudeCode}
 
@@ -203,5 +213,69 @@ func TestCustomAgents_CreateNewAgentNavigatesToBuilder(t *testing.T) {
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if updated.(Model).Screen != ScreenAgentBuilderEngine {
 		t.Fatalf("screen = %v, want ScreenAgentBuilderEngine", updated.(Model).Screen)
+	}
+}
+
+func TestCustomAgents_DeleteErrorPreservedOnUninstallFailure(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	regPath := filepath.Join(tempHome, ".config", "gentle-ai", "custom-agents.json")
+	if err := os.MkdirAll(filepath.Dir(regPath), 0755); err != nil {
+		t.Fatalf("MkdirAll regPath: %v", err)
+	}
+
+	claudeSkills := filepath.Join(tempHome, ".claude", "skills")
+	if err := os.MkdirAll(claudeSkills, 0755); err != nil {
+		t.Fatalf("MkdirAll claudeSkills: %v", err)
+	}
+
+	reg := &agentbuilder.Registry{
+		Version: 1,
+		Agents: []agentbuilder.RegistryEntry{
+			{
+				Name:             "fail-agent",
+				Title:            "Fail Agent",
+				CreatedAt:        time.Now(),
+				GenerationEngine: model.AgentClaudeCode,
+				InstalledAgents:  []model.AgentID{model.AgentClaudeCode},
+			},
+		},
+	}
+	if err := agentbuilder.SaveRegistry(regPath, reg); err != nil {
+		t.Fatalf("SaveRegistry: %v", err)
+	}
+
+	agent := &agentbuilder.GeneratedAgent{Name: "fail-agent", Title: "Fail Agent", Content: "# Fail\n"}
+	adapters := []agentbuilder.AdapterInfo{{AgentID: model.AgentClaudeCode, SkillsDir: claudeSkills}}
+	if _, err := agentbuilder.Install(agent, adapters, ""); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	m := NewModel(system.DetectionResult{}, "dev")
+	m.setScreen(ScreenCustomAgents)
+	if len(m.CustomAgentsList) != 1 {
+		t.Fatalf("CustomAgentsList len = %d, want 1", len(m.CustomAgentsList))
+	}
+
+	m.Screen = ScreenCustomAgentDelete
+	m.CustomAgentDeleteTarget = "fail-agent"
+	m.Cursor = 0 // "Delete Agent"
+
+	// Corrupt registry file so Uninstall fails to load it
+	if err := os.WriteFile(regPath, []byte("invalid json"), 0644); err != nil {
+		t.Fatalf("WriteFile corrupt reg: %v", err)
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	state := updated.(Model)
+	if state.Screen != ScreenCustomAgents {
+		t.Fatalf("screen = %v, want ScreenCustomAgents", state.Screen)
+	}
+	if state.CustomAgentsErr == nil {
+		t.Fatal("expected non-nil CustomAgentsErr on uninstall failure, got nil")
+	}
+	if errors.Is(state.CustomAgentsErr, agentbuilder.ErrAgentNotFound) {
+		t.Errorf("did not expect ErrAgentNotFound, got %v", state.CustomAgentsErr)
 	}
 }
