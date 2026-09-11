@@ -896,12 +896,15 @@ func syncComponentPaths(homeDir string, selection model.Selection, adapters []ag
 }
 
 func syncComponentPathsWithWorkspace(homeDir, workspaceDir string, selection model.Selection, adapters []agents.Adapter, component model.ComponentID) []string {
-	return syncComponentPathsWithWorkspaceScoped(homeDir, workspaceDir, ScopeGlobal, selection, adapters, component)
+	if component == model.ComponentPersona {
+		return syncPersonaPathsWithWorkspace(homeDir, workspaceDir, selection, adapters)
+	}
+	return componentPathsWithWorkspace(homeDir, workspaceDir, selection, adapters, component)
 }
 
 func syncComponentPathsWithWorkspaceScoped(homeDir, workspaceDir string, scope InstallScope, selection model.Selection, adapters []agents.Adapter, component model.ComponentID) []string {
 	if scope != ScopeWorkspace {
-		scope = ScopeGlobal
+		return syncComponentPathsWithWorkspace(homeDir, workspaceDir, selection, adapters, component)
 	}
 	if component == model.ComponentPersona {
 		return syncPersonaPathsWithWorkspaceScoped(homeDir, workspaceDir, scope, selection, adapters)
