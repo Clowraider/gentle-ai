@@ -257,6 +257,11 @@ internal/tui/router.go	NextScreen
 internal/tui/screens/claude_model_picker.go	NewClaudeModelPickerStateFromAssignments
 internal/tui/screens/codex_model_picker.go	CodexPresetDescription
 internal/tui/screens/codex_model_picker.go	HandleCodexCustomNav
+internal/tui/screens/custom_agents.go	CustomAgentDeleteOptionCount
+internal/tui/screens/custom_agents.go	CustomAgentsOptionCount
+internal/tui/screens/custom_agents.go	RenderCustomAgentDelete
+internal/tui/screens/custom_agents.go	RenderCustomAgents
+internal/tui/screens/custom_agents.go	sanitizeLabel
 internal/tui/screens/model_picker.go	ModelPickerRows
 internal/tui/screens/model_picker.go	SeparatorRowIdx
 internal/tui/screens/upgrade.go	RenderUpgrade
