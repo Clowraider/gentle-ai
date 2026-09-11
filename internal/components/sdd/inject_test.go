@@ -5837,9 +5837,23 @@ func TestInjectCodexWritesSDDOrchestratorAndSkills(t *testing.T) {
 		"`close_agent`",
 		"`send_input`",
 		"`wait_agent(task_name=",
+		"spawn_agent(task_name=\"sdd-design\"",
 	} {
 		if strings.Contains(text, stale) {
 			t.Errorf("agents.md retained legacy Codex multi-agent lifecycle fragment %q", stale)
+		}
+	}
+	for _, want := range []string{
+		"Canonical SDD phase and skill identifiers remain hyphenated (for example, `sdd-design`).",
+		"`sdd-apply`",
+		"`sdd-verify`",
+		"`task_name` is a Codex transport identifier: use only lowercase letters, digits, and underscores (for example, `sdd_design`).",
+		"Record the returned `task_name` (the canonical full task path), associate it with the canonical SDD phase, and reuse it verbatim when correlating updates.",
+		"After each wait, correlate the notification using that returned `task_name` to the canonical phase",
+		"spawn_agent(task_name=\"sdd_design\"",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("agents.md missing Codex task-name contract %q", want)
 		}
 	}
 
@@ -7816,6 +7830,33 @@ func TestEnsureClaudeReviewStopHookAppendsIdempotently(t *testing.T) {
 	}
 }
 
+func TestEnsureClaudeTelemetryHooksAppendsIdempotently(t *testing.T) {
+	home := t.TempDir()
+	settingsPath := filepath.Join(home, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settingsPath, []byte(`{"hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"echo keep"}]}]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := ensureClaudeTelemetryHooks(settingsPath)
+	if err != nil || !changed {
+		t.Fatal(changed, err)
+	}
+	changed, err = ensureClaudeTelemetryHooks(settingsPath)
+	if err != nil || changed {
+		t.Fatal(changed, err)
+	}
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if strings.Count(text, "gentle-ai telemetry runtime claude --json") != 2 || strings.Count(text, `"async": true`) != 2 || !strings.Contains(text, "echo keep") {
+		t.Fatalf("hooks not merged idempotently:\n%s", text)
+	}
+}
+
 func TestEnsureClaudeReviewStopHookRejectsUnexpectedHookSchema(t *testing.T) {
 	home := t.TempDir()
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
@@ -7914,6 +7955,15 @@ func TestEnsureCodexSkillRegistryHookWritesSessionStartHookIdempotently(t *testi
 	text := string(data)
 	if strings.Count(text, "gentle-ai skill-registry refresh") != 1 {
 		t.Fatalf("hook command count mismatch:\n%s", text)
+	}
+	if strings.Count(text, "gentle-ai telemetry runtime codex --json") != 2 {
+		t.Fatalf("Codex telemetry hook must cover SubagentStop and Stop exactly once:\n%s", text)
+	}
+	if strings.Count(text, `"async": true`) != 2 {
+		t.Fatalf("Codex telemetry hooks must be asynchronous:\n%s", text)
+	}
+	if !strings.Contains(text, `"SubagentStop"`) || !strings.Contains(text, `"Stop"`) {
+		t.Fatalf("Codex telemetry hook events missing:\n%s", text)
 	}
 	if !strings.Contains(text, `"SessionStart"`) {
 		t.Fatalf("Codex hook should use SessionStart, got:\n%s", text)
@@ -8087,6 +8137,9 @@ func TestInject_CodexInstallsSkillRegistryHook(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "gentle-ai skill-registry refresh") {
 		t.Fatalf("Codex hooks.json missing skill-registry refresh:\n%s", data)
+	}
+	if strings.Count(string(data), "gentle-ai telemetry runtime codex --json") != 2 {
+		t.Fatalf("Codex hooks.json missing telemetry Stop hooks:\n%s", data)
 	}
 }
 
