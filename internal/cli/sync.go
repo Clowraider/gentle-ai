@@ -526,6 +526,9 @@ func newSyncRuntime(homeDir string, selection model.Selection) (*syncRuntime, er
 }
 
 func newSyncRuntimeScoped(homeDir string, scope InstallScope, selection model.Selection) (*syncRuntime, error) {
+	if scope != ScopeWorkspace {
+		scope = ScopeGlobal
+	}
 	workspaceDir, _ := os.Getwd()
 	workspaceDir = resolveOpenClawWorkspaceDir(homeDir, workspaceDir, selection.Agents)
 	backupHome := ResolveAgentConfigDir(scope, homeDir, workspaceDir)
@@ -552,6 +555,9 @@ func newSyncRuntimeScoped(homeDir string, scope InstallScope, selection model.Se
 }
 
 func (r *syncRuntime) stagePlan() pipeline.StagePlan {
+	if r.scope != ScopeWorkspace {
+		r.scope = ScopeGlobal
+	}
 	adapters := resolveAdapters(r.agentIDs)
 	targets, targetErr := syncBackupTargetsScoped(r.homeDir, r.workspaceDir, r.scope, r.selection, adapters)
 	r.managedPaths = targets
@@ -673,6 +679,9 @@ func syncBackupTargets(homeDir, workspaceDir string, selection model.Selection, 
 }
 
 func syncBackupTargetsScoped(homeDir, workspaceDir string, scope InstallScope, selection model.Selection, adapters []agents.Adapter) ([]string, error) {
+	if scope != ScopeWorkspace {
+		scope = ScopeGlobal
+	}
 	paths := map[string]struct{}{}
 	for _, component := range selection.Components {
 		if scope == ScopeWorkspace && !workspaceSyncComponent(component) {
@@ -794,6 +803,9 @@ func syncAdapterSkillBackupTargets(homeDir, workspaceDir string, selection model
 }
 
 func syncAdapterSkillBackupTargetsScoped(homeDir, workspaceDir string, scope InstallScope, selection model.Selection, adapters []agents.Adapter) ([]string, error) {
+	if scope != ScopeWorkspace {
+		scope = ScopeGlobal
+	}
 	var paths []string
 	for _, adapter := range adapters {
 		if !adapter.SupportsSkills() {
@@ -840,6 +852,9 @@ func syncComponentPathsWithWorkspace(homeDir, workspaceDir string, selection mod
 }
 
 func syncComponentPathsWithWorkspaceScoped(homeDir, workspaceDir string, scope InstallScope, selection model.Selection, adapters []agents.Adapter, component model.ComponentID) []string {
+	if scope != ScopeWorkspace {
+		scope = ScopeGlobal
+	}
 	if component == model.ComponentPersona {
 		return syncPersonaPathsWithWorkspaceScoped(homeDir, workspaceDir, scope, selection, adapters)
 	}
@@ -864,6 +879,9 @@ func syncPersonaPathsWithWorkspace(homeDir, workspaceDir string, selection model
 }
 
 func syncPersonaPathsWithWorkspaceScoped(homeDir, workspaceDir string, scope InstallScope, selection model.Selection, adapters []agents.Adapter) []string {
+	if scope != ScopeWorkspace {
+		scope = ScopeGlobal
+	}
 	if selection.Persona == model.PersonaCustom {
 		return nil
 	}
@@ -1084,6 +1102,9 @@ func (s componentSyncStep) ID() string {
 }
 
 func (s componentSyncStep) Run() error {
+	if s.scope != ScopeWorkspace {
+		s.scope = ScopeGlobal
+	}
 	adapters := resolveAdapters(s.agents)
 
 	switch s.component {
@@ -1626,6 +1647,9 @@ func runSyncWithSelection(homeDir string, selection model.Selection, background 
 }
 
 func runSyncWithSelectionScoped(homeDir string, scope InstallScope, selection model.Selection, background OpenCodeBackgroundResolution, piBackground PiBackgroundResolution) (SyncResult, error) {
+	if scope != ScopeWorkspace {
+		scope = ScopeGlobal
+	}
 	agentIDs := selection.Agents
 	// The read error is captured, not discarded: the persona alias migration
 	// below must not rewrite state it could not read. Managed-asset provenance
@@ -2209,6 +2233,9 @@ func runPostSyncVerification(homeDir, workspaceDir string, selection model.Selec
 }
 
 func runPostSyncVerificationScoped(homeDir, workspaceDir string, scope InstallScope, selection model.Selection) verify.Report {
+	if scope != ScopeWorkspace {
+		scope = ScopeGlobal
+	}
 	checks := make([]verify.Check, 0)
 	adapters := resolveAdapters(selection.Agents)
 
