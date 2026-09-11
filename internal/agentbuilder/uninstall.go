@@ -24,14 +24,8 @@ type UninstallResult struct {
 // Uninstall removes the exact SKILL.md files owned by that entry, then
 // removes and saves the registry entry.
 func Uninstall(registryPath, agentName, homeDir string) (UninstallResult, error) {
-	if registryPath == "" {
-		return UninstallResult{}, fmt.Errorf("uninstall: registry path must not be empty")
-	}
-	if agentName == "" {
-		return UninstallResult{}, fmt.Errorf("uninstall: agent name must not be empty")
-	}
-	if homeDir == "" {
-		return UninstallResult{}, fmt.Errorf("uninstall: home dir must not be empty")
+	if registryPath == "" || agentName == "" || homeDir == "" {
+		return UninstallResult{}, fmt.Errorf("uninstall: registryPath, agentName, and homeDir are required")
 	}
 
 	registry, err := LoadRegistry(registryPath)
@@ -73,27 +67,22 @@ func Uninstall(registryPath, agentName, homeDir string) (UninstallResult, error)
 			return result, fmt.Errorf("uninstall: stat %s: %w", skillDir, err)
 		}
 
+		toRemove := filepath.Join(skillDir, "SKILL.md")
 		if info.Mode()&os.ModeSymlink != 0 {
-			if err := os.Remove(skillDir); err != nil {
-				if !os.IsNotExist(err) {
-					return result, fmt.Errorf("uninstall: remove symlink %s: %w", skillDir, err)
-				}
-			} else {
-				result.RemovedPaths = append(result.RemovedPaths, skillDir)
-			}
-			continue
+			toRemove = skillDir
 		}
 
-		skillFile := filepath.Join(skillDir, "SKILL.md")
-		if err := os.Remove(skillFile); err != nil {
+		if err := os.Remove(toRemove); err != nil {
 			if !os.IsNotExist(err) {
-				return result, fmt.Errorf("uninstall: remove %s: %w", skillFile, err)
+				return result, fmt.Errorf("uninstall: remove %s: %w", toRemove, err)
 			}
 		} else {
-			result.RemovedPaths = append(result.RemovedPaths, skillFile)
+			result.RemovedPaths = append(result.RemovedPaths, toRemove)
 		}
 
-		removeIfEmpty(skillDir)
+		if toRemove != skillDir {
+			removeIfEmpty(skillDir)
+		}
 	}
 
 	if !registry.RemoveByName(agentName) {
@@ -113,13 +102,7 @@ func validateTargetName(entryName string) error {
 	if filepath.IsAbs(entryName) {
 		return fmt.Errorf("absolute paths are not allowed")
 	}
-	if entryName != filepath.Base(entryName) {
-		return fmt.Errorf("path separators are not allowed")
-	}
-	if entryName == "." || entryName == ".." {
-		return fmt.Errorf("dot path segments are not allowed")
-	}
-	if strings.ContainsAny(entryName, `/\\`) {
+	if entryName != filepath.Base(entryName) || entryName == "." || entryName == ".." || strings.ContainsAny(entryName, `/\\`) {
 		return fmt.Errorf("path separators are not allowed")
 	}
 	return nil
@@ -132,14 +115,8 @@ func uninstallSkillDir(skillsDir, entryName string) (string, error) {
 
 	skillDir := filepath.Join(skillsDir, entryName)
 	rel, err := filepath.Rel(skillsDir, skillDir)
-	if err != nil {
-		return "", fmt.Errorf("cannot resolve relative path: %w", err)
-	}
-	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.Dir(rel) != "." {
 		return "", fmt.Errorf("resolved path escapes skills directory")
-	}
-	if filepath.Dir(rel) != "." {
-		return "", fmt.Errorf("resolved path must stay within a single leaf directory")
 	}
 
 	return skillDir, nil
@@ -155,9 +132,7 @@ func supportedSkillsDirs(homeDir string) map[model.AgentID]string {
 }
 
 func removeIfEmpty(path string) {
-	entries, err := os.ReadDir(path)
-	if err != nil || len(entries) != 0 {
-		return
+	if entries, err := os.ReadDir(path); err == nil && len(entries) == 0 {
+		_ = os.Remove(path)
 	}
-	_ = os.Remove(path)
 }
