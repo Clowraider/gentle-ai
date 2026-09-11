@@ -137,6 +137,16 @@ func TestEveryReviewStopReasonCodeHasAShippedContinuation(t *testing.T) {
 		}
 		t.Errorf("shipped %s entry for %q names no runnable `gentle-ai` command, no `--flag` to pass on the same invocation, and no D/S continuation alias, so this stop reads as a dead end", reviewLedgerContractAsset, code)
 	}
+
+	// Issue #3972: the clone-local override can only disable, so
+	// `enable --scope clone` cannot turn reviews on when the global switch is
+	// unset or off; it only clears a clone-local off. The one command that
+	// enables is the global form, and the rdd_disabled continuation must name
+	// it, or the documented loop is rdd_disabled -> clone enable (no-op) ->
+	// rdd_disabled.
+	if continuation := assetCodes["rdd_disabled"]; !strings.Contains(continuation, "`gentle-ai review mode enable --scope global`") {
+		t.Errorf("shipped %s entry for rdd_disabled does not name the command that enables (`gentle-ai review mode enable --scope global`): %q", reviewLedgerContractAsset, continuation)
+	}
 }
 
 // TestReviewStopReasonDocsSectionStopsAtTheNextHeadingOfAnyLevel is the
@@ -273,28 +283,6 @@ func TestNamedReviewModeDisableIsAlwaysCloneScoped(t *testing.T) {
 	for _, invocation := range invocations {
 		if !strings.Contains(invocation, "--scope clone") || !strings.Contains(invocation, "--cwd <B>") {
 			t.Errorf("shipped asset: %s defaults to global scope if run as printed (verified by execution: omitting --scope writes ~/.gentle-ai/state.json machine-wide) -- name --scope clone --cwd <B> instead", invocation)
-		}
-	}
-}
-
-// TestShippedUnchangedOrUnverifiedAuthorityNamesTheRealPrecondition is the
-// execution-based RED-first proof for adversarial finding F4: `gentle-ai
-// review start` on a candidate whose target is unchanged from the current
-// authority does not start a fresh lineage -- it resumes the SAME one
-// (confirmed by execution: the response reports `"action": "resumed"` with
-// the identical lineage_id). Naming only `gentle-ai review start` loops the
-// consumer back to the same stop. The row/entry must disclose that the
-// candidate needs to change first.
-func TestShippedUnchangedOrUnverifiedAuthorityNamesTheRealPrecondition(t *testing.T) {
-	for label, content := range reviewStopReasonDocsCompleteDocuments(t) {
-		section := reviewStopReasonDocsSection(t, content)
-		row := reviewStopReasonTableRow(t, section, "unchanged_or_unverified_authority")
-		lowered := strings.ToLower(row)
-		if !strings.Contains(lowered, "resum") {
-			t.Errorf("%s: unchanged_or_unverified_authority row never discloses that `review start` on an unchanged candidate only resumes the same lineage: %q", label, row)
-		}
-		if !strings.Contains(lowered, "change") {
-			t.Errorf("%s: unchanged_or_unverified_authority row never states that the candidate must change first: %q", label, row)
 		}
 	}
 }
