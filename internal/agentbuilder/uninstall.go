@@ -21,6 +21,179 @@ type UninstallResult struct {
 	SkippedAgents []model.AgentID
 }
 
+type stagedKind int
+
+const (
+	stagedFile stagedKind = iota
+	stagedSymlink
+)
+
+type stagedItem struct {
+	parent    *os.Root
+	sub       *os.Root
+	kind      stagedKind
+	name      string
+	tmp       string
+	finalPath string
+}
+
+func rollbackStaged(items []stagedItem) {
+	for i := len(items) - 1; i >= 0; i-- {
+		it := items[i]
+		if it.kind == stagedSymlink {
+			_ = it.parent.Rename(it.tmp, it.name)
+		} else if it.kind == stagedFile {
+			_ = it.sub.Rename(it.tmp, "SKILL.md")
+		}
+		if it.sub != nil {
+			_ = it.sub.Close()
+		}
+		if it.parent != nil {
+			_ = it.parent.Close()
+		}
+	}
+}
+
+func commitStaged(items []stagedItem) []string {
+	var removed []string
+	for _, it := range items {
+		if it.kind == stagedSymlink {
+			if err := it.parent.Remove(it.tmp); err == nil {
+				removed = append(removed, it.finalPath)
+			}
+		} else if it.kind == stagedFile {
+			if err := it.sub.Remove(it.tmp); err == nil {
+				removed = append(removed, it.finalPath)
+			}
+			_ = it.sub.Close()
+			_ = it.parent.Remove(it.name)
+		}
+		if it.parent != nil {
+			_ = it.parent.Close()
+		}
+	}
+	return removed
+}
+
+func stageSkillRemoval(skillsDir, targetName string) (*stagedItem, error) {
+	parentRoot, err := os.OpenRoot(skillsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("stat target: %w", err)
+	}
+
+	fi, err := parentRoot.Lstat(targetName)
+	if err != nil {
+		_ = parentRoot.Close()
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("stat target: %w", err)
+	}
+
+	skillDir := filepath.Join(skillsDir, targetName)
+
+	if fi.Mode()&os.ModeSymlink != 0 {
+		tmpName := targetName + ".uninstall-tmp"
+		if err := parentRoot.Rename(targetName, tmpName); err != nil {
+			_ = parentRoot.Close()
+			return nil, fmt.Errorf("remove %s: %w", skillDir, err)
+		}
+		return &stagedItem{
+			parent:    parentRoot,
+			kind:      stagedSymlink,
+			name:      targetName,
+			tmp:       tmpName,
+			finalPath: skillDir,
+		}, nil
+	}
+
+	subRoot, err := parentRoot.OpenRoot(targetName)
+	if err != nil {
+		if lfi, lerr := parentRoot.Lstat(targetName); lerr == nil && lfi.Mode()&os.ModeSymlink != 0 {
+			tmpName := targetName + ".uninstall-tmp"
+			if rerr := parentRoot.Rename(targetName, tmpName); rerr != nil {
+				_ = parentRoot.Close()
+				return nil, fmt.Errorf("remove %s: %w", skillDir, rerr)
+			}
+			return &stagedItem{
+				parent:    parentRoot,
+				kind:      stagedSymlink,
+				name:      targetName,
+				tmp:       tmpName,
+				finalPath: skillDir,
+			}, nil
+		}
+		_ = parentRoot.Close()
+		return nil, fmt.Errorf("stat %s: %w", skillDir, err)
+	}
+
+	subStat, err := subRoot.Stat(".")
+	if err != nil {
+		_ = subRoot.Close()
+		_ = parentRoot.Close()
+		return nil, fmt.Errorf("stat %s: %w", skillDir, err)
+	}
+	latestLstat, err := parentRoot.Lstat(targetName)
+	if err != nil {
+		_ = subRoot.Close()
+		_ = parentRoot.Close()
+		return nil, fmt.Errorf("stat %s: %w", skillDir, err)
+	}
+	if latestLstat.Mode()&os.ModeSymlink != 0 || !os.SameFile(subStat, latestLstat) {
+		_ = subRoot.Close()
+		tmpName := targetName + ".uninstall-tmp"
+		if err := parentRoot.Rename(targetName, tmpName); err != nil {
+			_ = parentRoot.Close()
+			return nil, fmt.Errorf("remove %s: %w", skillDir, err)
+		}
+		return &stagedItem{
+			parent:    parentRoot,
+			kind:      stagedSymlink,
+			name:      targetName,
+			tmp:       tmpName,
+			finalPath: skillDir,
+		}, nil
+	}
+
+	skillFile := filepath.Join(skillDir, "SKILL.md")
+	sfi, err := subRoot.Lstat("SKILL.md")
+	if err != nil {
+		_ = subRoot.Close()
+		_ = parentRoot.Remove(targetName)
+		_ = parentRoot.Close()
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("stat %s: %w", skillFile, err)
+	}
+
+	if sfi.IsDir() {
+		err := subRoot.Remove("SKILL.md")
+		_ = subRoot.Close()
+		_ = parentRoot.Close()
+		return nil, fmt.Errorf("remove %s: %w", skillFile, err)
+	}
+
+	tmpSkill := "SKILL.md.uninstall-tmp"
+	if err := subRoot.Rename("SKILL.md", tmpSkill); err != nil {
+		_ = subRoot.Close()
+		_ = parentRoot.Close()
+		return nil, fmt.Errorf("remove %s: %w", skillFile, err)
+	}
+
+	return &stagedItem{
+		parent:    parentRoot,
+		sub:       subRoot,
+		kind:      stagedFile,
+		name:      targetName,
+		tmp:       tmpSkill,
+		finalPath: skillFile,
+	}, nil
+}
+
 // Uninstall removes the exact SKILL.md files owned by that entry, then
 // removes and saves the registry entry.
 func Uninstall(registryPath, agentName, homeDir string) (UninstallResult, error) {
@@ -46,6 +219,7 @@ func Uninstall(registryPath, agentName, homeDir string) (UninstallResult, error)
 
 	result := UninstallResult{}
 	skillsDirs := supportedSkillsDirs(homeDir)
+	var staged []stagedItem
 
 	for _, agentID := range installedAgents {
 		skillsDir, ok := skillsDirs[agentID]
@@ -54,44 +228,31 @@ func Uninstall(registryPath, agentName, homeDir string) (UninstallResult, error)
 			continue
 		}
 
-		skillDir, err := uninstallSkillDir(skillsDir, targetName)
-		if err != nil {
+		if _, err := uninstallSkillDir(skillsDir, targetName); err != nil {
+			rollbackStaged(staged)
 			return result, fmt.Errorf("uninstall: invalid registry entry name %q for agent %s: %w", targetName, agentID, err)
 		}
 
-		info, err := os.Lstat(skillDir)
+		item, err := stageSkillRemoval(skillsDir, targetName)
 		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return result, fmt.Errorf("uninstall: stat %s: %w", skillDir, err)
+			rollbackStaged(staged)
+			return result, fmt.Errorf("uninstall: %w", err)
 		}
-
-		toRemove := filepath.Join(skillDir, "SKILL.md")
-		if info.Mode()&os.ModeSymlink != 0 {
-			toRemove = skillDir
-		}
-
-		if err := os.Remove(toRemove); err != nil {
-			if !os.IsNotExist(err) {
-				return result, fmt.Errorf("uninstall: remove %s: %w", toRemove, err)
-			}
-		} else {
-			result.RemovedPaths = append(result.RemovedPaths, toRemove)
-		}
-
-		if toRemove != skillDir {
-			removeIfEmpty(skillDir)
+		if item != nil {
+			staged = append(staged, *item)
 		}
 	}
 
 	if !registry.RemoveByName(agentName) {
+		rollbackStaged(staged)
 		return result, fmt.Errorf("uninstall: agent %q disappeared from registry", agentName)
 	}
 	if err := saveRegistry(registryPath, registry); err != nil {
+		rollbackStaged(staged)
 		return result, fmt.Errorf("uninstall: save registry: %w", err)
 	}
 
+	result.RemovedPaths = commitStaged(staged)
 	return result, nil
 }
 

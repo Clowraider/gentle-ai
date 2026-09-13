@@ -180,7 +180,7 @@ func TestUninstall_ErrorScenarios(t *testing.T) {
 		wantErr   string
 	}{
 		{
-			name:      "save registry failure preserves registry entry on disk while files removed",
+			name:      "save registry failure preserves registry entry and owned files on disk",
 			agentName: "save-failure-agent",
 			agents:    []model.AgentID{model.AgentClaudeCode, model.AgentOpenCode},
 			stubSave:  true,
@@ -268,8 +268,24 @@ func TestUninstall_ErrorScenarios(t *testing.T) {
 			}
 			if tt.stubSave {
 				for _, f := range ownedFiles {
+					if _, err := os.Stat(f); err != nil {
+						t.Fatalf("expected file preserved on save failure: %s: %v", f, err)
+					}
+				}
+				saveRegistry = SaveRegistry
+				retryResult, retryErr := Uninstall(regPath, name, home)
+				if retryErr != nil {
+					t.Fatalf("expected retry to succeed, got %v", retryErr)
+				}
+				if len(retryResult.RemovedPaths) != len(ownedFiles) {
+					t.Fatalf("expected %d removed paths on retry, got %d", len(ownedFiles), len(retryResult.RemovedPaths))
+				}
+				if loadRegistryForTest(t, regPath).FindByName(name) != nil {
+					t.Fatal("expected registry entry removed after retry")
+				}
+				for _, f := range ownedFiles {
 					if _, err := os.Stat(f); !os.IsNotExist(err) {
-						t.Fatalf("expected file removed: %s", f)
+						t.Fatalf("expected file removed after retry: %s", f)
 					}
 				}
 			}
@@ -282,38 +298,67 @@ func TestUninstall_ErrorScenarios(t *testing.T) {
 	}
 }
 
-func TestUninstall_SymlinkedSkillDirDoesNotDeleteOutsideTarget(t *testing.T) {
-	home := t.TempDir()
-	outsideSkill := filepath.Join(home, "outside", "SKILL.md")
-	writeSkillFile(t, outsideSkill, "# Outside Skill\n")
+func TestUninstall_ParentReplacementDoesNotDeleteTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		targetFn func(t *testing.T, home, skillsDir string) (string, string)
+	}{
+		{
+			name: "outside symlinked parent directory",
+			targetFn: func(t *testing.T, home, skillsDir string) (string, string) {
+				outsideSkill := filepath.Join(home, "outside", "SKILL.md")
+				writeSkillFile(t, outsideSkill, "# Outside Skill\n")
+				link := filepath.Join(skillsDir, "symlink-agent")
+				if err := os.Symlink(filepath.Dir(outsideSkill), link); err != nil {
+					t.Fatalf("Symlink %s: %v", link, err)
+				}
+				return outsideSkill, link
+			},
+		},
+		{
+			name: "inside symlinked parent directory",
+			targetFn: func(t *testing.T, home, skillsDir string) (string, string) {
+				victimSkill := filepath.Join(skillsDir, "victim", "SKILL.md")
+				writeSkillFile(t, victimSkill, "# Victim Skill\n")
+				link := filepath.Join(skillsDir, "symlink-agent")
+				if err := os.Symlink(filepath.Dir(victimSkill), link); err != nil {
+					t.Fatalf("Symlink %s: %v", link, err)
+				}
+				return victimSkill, link
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			skillsDir := supportedSkillsDirs(home)[model.AgentOpenCode]
+			if err := os.MkdirAll(skillsDir, 0755); err != nil {
+				t.Fatalf("MkdirAll skillsDir: %v", err)
+			}
+			targetSkill, skillLink := tc.targetFn(t, home, skillsDir)
 
-	skillsDir := supportedSkillsDirs(home)[model.AgentOpenCode]
-	if err := os.MkdirAll(skillsDir, 0755); err != nil {
-		t.Fatalf("MkdirAll skillsDir: %v", err)
-	}
-	skillLink := filepath.Join(skillsDir, "symlink-agent")
-	if err := os.Symlink(filepath.Dir(outsideSkill), skillLink); err != nil {
-		t.Fatalf("Symlink %s: %v", skillLink, err)
-	}
+			regPath := writeRegistryForUninstall(t, home, entry("symlink-agent", model.AgentOpenCode))
+			result, err := Uninstall(regPath, "symlink-agent", home)
+			if err != nil {
+				t.Fatalf("Uninstall: %v", err)
+			}
 
-	regPath := writeRegistryForUninstall(t, home, entry("symlink-agent", model.AgentOpenCode))
-	result, err := Uninstall(regPath, "symlink-agent", home)
-	if err != nil {
-		t.Fatalf("Uninstall: %v", err)
-	}
-
-	data, err := os.ReadFile(outsideSkill)
-	if err != nil || string(data) != "# Outside Skill\n" {
-		t.Fatalf("outside SKILL.md altered or missing: %v, %q", err, string(data))
-	}
-	if _, err := os.Lstat(skillLink); !os.IsNotExist(err) {
-		t.Fatalf("expected symlink %s removed, got err = %v", skillLink, err)
-	}
-	if loadRegistryForTest(t, regPath).FindByName("symlink-agent") != nil {
-		t.Fatal("expected registry entry removed")
-	}
-	if len(result.RemovedPaths) != 1 || result.RemovedPaths[0] != skillLink {
-		t.Fatalf("RemovedPaths = %v, want [%s]", result.RemovedPaths, skillLink)
+			data, err := os.ReadFile(targetSkill)
+			if err != nil {
+				t.Fatalf("target SKILL.md altered or missing: %v", err)
+			}
+			if !strings.HasPrefix(string(data), "# ") {
+				t.Fatalf("target SKILL.md content corrupted: %q", string(data))
+			}
+			if _, err := os.Lstat(skillLink); !os.IsNotExist(err) {
+				t.Fatalf("expected symlink %s removed, got err = %v", skillLink, err)
+			}
+			if loadRegistryForTest(t, regPath).FindByName("symlink-agent") != nil {
+				t.Fatal("expected registry entry removed")
+			}
+			if len(result.RemovedPaths) != 1 || result.RemovedPaths[0] != skillLink {
+				t.Fatalf("RemovedPaths = %v, want [%s]", result.RemovedPaths, skillLink)
+			}
+		})
 	}
 }
 
