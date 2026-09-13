@@ -1811,7 +1811,11 @@ func runSyncWithSelectionScoped(homeDir string, scope InstallScope, selection mo
 	}
 
 	// Post-apply verification reuses the same component paths as install.
-	result.Verify = runPostSyncVerificationScoped(homeDir, rt.workspaceDir, scope, selection)
+	if scope == ScopeWorkspace {
+		result.Verify = runPostSyncVerificationScoped(homeDir, rt.workspaceDir, scope, selection)
+	} else {
+		result.Verify = runPostSyncVerification(homeDir, rt.workspaceDir, selection)
+	}
 	configChecks := verify.RunChecks(context.Background(), openCodeConfigChecks(homeDir, rt.workspaceDir, agentIDs))
 	result.Verify = verify.BuildReport(append(result.Verify.Checks, configChecks...))
 	result.Verify = withFailedSyncVerificationNote(result.Verify)
@@ -2038,7 +2042,12 @@ func RunSync(args []string) (SyncResult, error) {
 		if err != nil || noOp {
 			return result, err
 		}
-		rt, err := newSyncRuntimeScoped(homeDir, scope, selection)
+		var rt *syncRuntime
+		if scope == ScopeWorkspace {
+			rt, err = newSyncRuntimeScoped(homeDir, scope, selection)
+		} else {
+			rt, err = newSyncRuntime(homeDir, selection)
+		}
 		if err != nil {
 			return result, err
 		}
