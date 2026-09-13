@@ -416,12 +416,7 @@ func BuildSyncSelection(flags SyncFlags, agentIDs []model.AgentID) model.Selecti
 }
 
 func workspaceSyncComponent(component model.ComponentID) bool {
-	switch component {
-	case model.ComponentPersona, model.ComponentSDD, model.ComponentEngram, model.ComponentContext7, model.ComponentSkills:
-		return true
-	default:
-		return false
-	}
+	return component == model.ComponentPersona || component == model.ComponentSDD || component == model.ComponentEngram || component == model.ComponentContext7 || component == model.ComponentSkills
 }
 
 func RestorePersistedSelection(selection *model.Selection, persisted state.InstallState, flags SyncFlags) {
@@ -583,7 +578,10 @@ func (r *syncRuntime) stagePlan() pipeline.StagePlan {
 		},
 	}
 
-	telemetryDir := openCodeTelemetryConfigDir(r.homeDir, r.workspaceDir, ScopeGlobal, r.agentIDs)
+	var telemetryDir string
+	if r.scope == ScopeGlobal {
+		telemetryDir = openCodeTelemetryConfigDir(r.homeDir, r.workspaceDir, ScopeGlobal, r.agentIDs)
+	}
 	if telemetryDir != "" {
 		prepare = append([]pipeline.Step{openCodeTelemetryStep{id: "prepare:opencode-telemetry", configDir: telemetryDir, checkOnly: true}}, prepare...)
 	}
@@ -815,11 +813,8 @@ func syncBackupTargetsScoped(homeDir, workspaceDir string, scope InstallScope, s
 		if component == model.ComponentPersona {
 			plan := persona.ResourcePlanFor(selection.Persona)
 			for _, adapter := range adapters {
-				if adapter.Agent() == model.AgentPi {
-					paths[adapter.SystemPromptFile(homeDir)] = struct{}{}
-				}
 				if adapter.Agent() == model.AgentOpenCode || adapter.Agent() == model.AgentKilocode {
-					if path := adapter.SettingsPath(componentInjectionDir(homeDir, workspaceDir, adapter)); path != "" {
+					if path := adapter.SettingsPath(componentInjectionDirScoped(homeDir, workspaceDir, scope, adapter)); path != "" {
 						paths[path] = struct{}{}
 					}
 				}
@@ -913,6 +908,15 @@ func syncComponentPathsWithWorkspaceScoped(homeDir, workspaceDir string, scope I
 	}
 	if component == model.ComponentPersona {
 		return syncPersonaPathsWithWorkspaceScoped(homeDir, workspaceDir, scope, selection, adapters)
+	}
+	if component == model.ComponentEngram {
+		filtered := make([]agents.Adapter, 0, len(adapters))
+		for _, a := range adapters {
+			if a.Agent() != model.AgentOpenClaw {
+				filtered = append(filtered, a)
+			}
+		}
+		adapters = filtered
 	}
 	return componentPathsWithWorkspaceScoped(homeDir, workspaceDir, scope, selection, adapters, component)
 }
@@ -1182,6 +1186,9 @@ func (s componentSyncStep) Run() error {
 			Version:                     engramVersion,
 		}
 		for _, adapter := range adapters {
+			if s.scope == ScopeWorkspace && adapter.Agent() == model.AgentOpenClaw {
+				continue
+			}
 			var res engram.InjectionResult
 			var err error
 			if adapter.Agent() == model.AgentOpenClaw {
@@ -1225,7 +1232,7 @@ func (s componentSyncStep) Run() error {
 			settingsPath := ""
 			for _, adapter := range adapters {
 				if adapter.Agent() == model.AgentOpenCode {
-					settingsPath = effectiveOpenCodeSettingsPath(s.homeDir, s.workspaceDir, ScopeGlobal, adapter)
+					settingsPath = effectiveOpenCodeSettingsPath(s.homeDir, s.workspaceDir, s.scope, adapter)
 					break
 				}
 			}
@@ -1251,7 +1258,7 @@ func (s componentSyncStep) Run() error {
 			targetDir := componentInjectionDirScoped(s.homeDir, s.workspaceDir, s.scope, adapter)
 			opts := sdd.InjectOptions{
 				OpenCodeModelAssignments:           s.selection.ModelAssignments,
-				OpenCodeSettingsPath:               effectiveOpenCodeSettingsPath(s.homeDir, s.workspaceDir, ScopeGlobal, adapter),
+				OpenCodeSettingsPath:               effectiveOpenCodeSettingsPath(s.homeDir, s.workspaceDir, s.scope, adapter),
 				ClaudeModelAssignments:             s.selection.ClaudeModelAssignments,
 				ClaudePhaseAssignments:             s.selection.ClaudePhaseAssignments,
 				KiroModelAssignments:               s.selection.KiroModelAssignments,
@@ -1723,7 +1730,7 @@ func runSyncWithSelectionScoped(homeDir string, scope InstallScope, selection mo
 	}
 	if len(selection.ModelAssignments) == 0 && len(persistedState.ModelAssignments) > 0 {
 		workspaceDir, _ := os.Getwd()
-		selection.ModelAssignments = restoreOpenCodeModelAssignmentsFromState(homeDir, workspaceDir, ScopeGlobal, persistedState, selection.SDDMode)
+		selection.ModelAssignments = restoreOpenCodeModelAssignmentsFromState(homeDir, workspaceDir, scope, persistedState, selection.SDDMode)
 	}
 
 	// Migrate a persisted legacy alias BEFORE any early return: a no-agent
@@ -1804,11 +1811,7 @@ func runSyncWithSelectionScoped(homeDir string, scope InstallScope, selection mo
 	}
 
 	// Post-apply verification reuses the same component paths as install.
-	if scope == ScopeWorkspace {
-		result.Verify = runPostSyncVerificationScoped(homeDir, rt.workspaceDir, scope, selection)
-	} else {
-		result.Verify = runPostSyncVerification(homeDir, rt.workspaceDir, selection)
-	}
+	result.Verify = runPostSyncVerificationScoped(homeDir, rt.workspaceDir, scope, selection)
 	configChecks := verify.RunChecks(context.Background(), openCodeConfigChecks(homeDir, rt.workspaceDir, agentIDs))
 	result.Verify = verify.BuildReport(append(result.Verify.Checks, configChecks...))
 	result.Verify = withFailedSyncVerificationNote(result.Verify)
@@ -1977,7 +1980,7 @@ func RunSync(args []string) (SyncResult, error) {
 	}
 	if len(selection.ModelAssignments) == 0 && len(persistedState.ModelAssignments) > 0 {
 		workspaceDir, _ := os.Getwd()
-		selection.ModelAssignments = restoreOpenCodeModelAssignmentsFromState(homeDir, workspaceDir, ScopeGlobal, persistedState, selection.SDDMode)
+		selection.ModelAssignments = restoreOpenCodeModelAssignmentsFromState(homeDir, workspaceDir, scope, persistedState, selection.SDDMode)
 	}
 	if selection.CodexOrchestratorAssignment == nil && persistedState.CodexOrchestratorAssignment != nil {
 		selection.CodexOrchestratorAssignment = codexOrchestratorFromState(persistedState.CodexOrchestratorAssignment)
@@ -2035,12 +2038,7 @@ func RunSync(args []string) (SyncResult, error) {
 		if err != nil || noOp {
 			return result, err
 		}
-		var rt *syncRuntime
-		if scope == ScopeWorkspace {
-			rt, err = newSyncRuntimeScoped(homeDir, scope, selection)
-		} else {
-			rt, err = newSyncRuntime(homeDir, selection)
-		}
+		rt, err := newSyncRuntimeScoped(homeDir, scope, selection)
 		if err != nil {
 			return result, err
 		}
@@ -2072,12 +2070,7 @@ func RunSync(args []string) (SyncResult, error) {
 	}
 	background.activationPlan = backgroundActivation
 	preparePiBackgroundProjection(homeDir, &piBackground, scope == ScopeGlobal && containsAgent(agentIDs, model.AgentPi))
-	var result SyncResult
-	if scope == ScopeWorkspace {
-		result, err = runSyncWithSelectionScoped(homeDir, scope, selection, background, piBackground)
-	} else {
-		result, err = runSyncWithSelection(homeDir, selection, background, piBackground)
-	}
+	result, err := runSyncWithSelectionScoped(homeDir, scope, selection, background, piBackground)
 	if err != nil {
 		return result, err
 	}
