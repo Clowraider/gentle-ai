@@ -50,9 +50,9 @@ func TestCodeGraphCompatibilityStrategies(t *testing.T) {
 		strategy codeGraphStrategy
 		agents   []model.AgentID
 	}{
-		{codeGraphNative, []model.AgentID{model.AgentClaudeCode, model.AgentCursor, model.AgentCodex, model.AgentGeminiCLI, model.AgentHermes, model.AgentAntigravity, model.AgentKiroIDE}},
+		{codeGraphNative, []model.AgentID{model.AgentClaudeCode, model.AgentCursor, model.AgentCodex, model.AgentGeminiCLI, model.AgentHermes, model.AgentAntigravity, model.AgentKiroIDE, model.AgentGitHubCopilotCLI}},
 		{codeGraphReconciled, []model.AgentID{model.AgentOpenCode, model.AgentPi}},
-		{codeGraphExcluded, []model.AgentID{model.AgentKilocode, model.AgentVSCodeCopilot, model.AgentWindsurf, model.AgentKimi, model.AgentQwenCode, model.AgentOpenClaw, model.AgentTrae, model.AgentGitHubCopilotCLI}},
+		{codeGraphExcluded, []model.AgentID{model.AgentKilocode, model.AgentVSCodeCopilot, model.AgentWindsurf, model.AgentKimi, model.AgentQwenCode, model.AgentOpenClaw, model.AgentTrae}},
 	}
 	for _, tt := range tests {
 		for _, id := range tt.agents {
@@ -69,7 +69,7 @@ func TestExcludedAgentsNeverEnterCodeGraphSurfaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []model.AgentID{model.AgentKilocode, model.AgentVSCodeCopilot, model.AgentWindsurf, model.AgentKimi, model.AgentQwenCode, model.AgentOpenClaw, model.AgentTrae, model.AgentGitHubCopilotCLI} {
+	for _, id := range []model.AgentID{model.AgentKilocode, model.AgentVSCodeCopilot, model.AgentWindsurf, model.AgentKimi, model.AgentQwenCode, model.AgentOpenClaw, model.AgentTrae} {
 		t.Run(string(id), func(t *testing.T) {
 			home := t.TempDir()
 			adapter, ok := reg.Get(id)
@@ -164,12 +164,14 @@ func TestAntigravityRequiresCanonicalCodeGraphEntry(t *testing.T) {
 }
 
 func TestCodeGraphNativeOwnedPaths(t *testing.T) {
+	t.Setenv("COPILOT_HOME", "")
 	home := t.TempDir()
 	reg, _ := agents.NewDefaultRegistry()
 	tests := map[model.AgentID][]string{
-		model.AgentClaudeCode:  {filepath.Join(home, ".claude.json")},
-		model.AgentAntigravity: {filepath.Join(home, ".gemini", "config", "mcp_config.json"), filepath.Join(home, ".gemini", "antigravity", "mcp_config.json")},
-		model.AgentKiroIDE:     {filepath.Join(home, ".kiro", "settings", "mcp.json")},
+		model.AgentClaudeCode:       {filepath.Join(home, ".claude.json")},
+		model.AgentAntigravity:      {filepath.Join(home, ".gemini", "config", "mcp_config.json"), filepath.Join(home, ".gemini", "antigravity", "mcp_config.json")},
+		model.AgentKiroIDE:          {filepath.Join(home, ".kiro", "settings", "mcp.json")},
+		model.AgentGitHubCopilotCLI: {filepath.Join(home, ".copilot", "mcp-config.json"), filepath.Join(home, ".copilot", "settings.json")},
 	}
 	for id, want := range tests {
 		adapter, _ := reg.Get(id)
@@ -177,6 +179,18 @@ func TestCodeGraphNativeOwnedPaths(t *testing.T) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s paths = %v, want %v", id, got, want)
 		}
+	}
+}
+
+func TestCopilotCLICodeGraphWiring(t *testing.T) {
+	t.Setenv("COPILOT_HOME", "")
+	home := t.TempDir()
+	reg, _ := agents.NewDefaultRegistry()
+	adapter, _ := reg.Get(model.AgentGitHubCopilotCLI)
+	mustWrite(t, filepath.Join(home, ".copilot", "mcp-config.json"), `{"mcpServers":{"codegraph":{"command":"codegraph","args":["serve","--mcp"]}}}`)
+	mustWrite(t, filepath.Join(home, ".copilot", "copilot-instructions.md"), "<!-- gentle-ai:codegraph-guidance -->\n`gentle-ai codegraph init`\n<!-- /gentle-ai:codegraph-guidance -->")
+	if configured, _, _ := hasCodeGraphWiring(home, adapter); !configured {
+		t.Fatal("Copilot CLI CodeGraph wiring not configured")
 	}
 }
 

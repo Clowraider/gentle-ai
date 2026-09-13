@@ -60,14 +60,14 @@ func (a *Adapter) InstallCommand(profile system.PlatformProfile) ([][]string, er
 
 func (a *Adapter) GlobalConfigDir(homeDir string) string { return copilotconfig.Root(homeDir) }
 func (a *Adapter) SystemPromptDir(homeDir string) string { return copilotconfig.Root(homeDir) }
-func (a *Adapter) SystemPromptFile(homeDir string) string {
-	return filepath.Join(copilotconfig.Root(homeDir), "copilot-instructions.md")
-}
 func (a *Adapter) SkillsDir(homeDir string) string {
 	return filepath.Join(copilotconfig.Root(homeDir), "skills")
 }
 func (a *Adapter) SettingsPath(homeDir string) string {
 	return filepath.Join(copilotconfig.Root(homeDir), "settings.json")
+}
+func (a *Adapter) SystemPromptFile(homeDir string) string {
+	return filepath.Join(copilotconfig.Root(homeDir), "copilot-instructions.md")
 }
 func (a *Adapter) MCPConfigPath(homeDir string, _ string) string {
 	return filepath.Join(copilotconfig.Root(homeDir), "mcp-config.json")

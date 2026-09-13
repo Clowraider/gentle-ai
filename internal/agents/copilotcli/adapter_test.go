@@ -1,6 +1,7 @@
 package copilotcli
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"os"
@@ -33,10 +34,7 @@ func TestCopilotCLIAdapter_Detect(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("COPILOT_HOME", tt.copilotHome)
-			wantCfg := tt.wantCfg
-			if tt.copilotHome != "" {
-				wantCfg = tt.copilotHome
-			}
+			wantCfg := cmp.Or(tt.copilotHome, tt.wantCfg)
 			a := &Adapter{
 				lookPath: tt.lookPath,
 				statPath: func(path string) statResult {
@@ -47,14 +45,8 @@ func TestCopilotCLIAdapter_Detect(t *testing.T) {
 				},
 			}
 			ins, bin, cfg, found, err := a.Detect(context.Background(), "/home/u")
-			if tt.wantErr != nil {
-				if !errors.Is(err, tt.wantErr) {
-					t.Errorf("got %v, want %v", err, tt.wantErr)
-				}
-				return
-			}
-			if err != nil || ins != tt.wantIns || bin != tt.wantBin || cfg != wantCfg || found != tt.wantFound {
-				t.Errorf("got (%v, %q, %q, %v, %v)", ins, bin, cfg, found, err)
+			if !errors.Is(err, tt.wantErr) || (tt.wantErr == nil && (ins != tt.wantIns || bin != tt.wantBin || cfg != wantCfg || found != tt.wantFound)) {
+				t.Errorf("got (%v, %q, %q, %v, %v), want err %v", ins, bin, cfg, found, err, tt.wantErr)
 			}
 		})
 	}

@@ -49,7 +49,7 @@ var codeGraphCompatibilityTable = map[model.AgentID]codeGraphCompatibility{
 	model.AgentPi:               reconciledCompatibility(model.AgentPi, ""),
 	model.AgentTrae:             excludedCompatibility(model.AgentTrae),
 	model.AgentHermes:           nativeCompatibility(model.AgentHermes, "hermes"),
-	model.AgentGitHubCopilotCLI: excludedCompatibility(model.AgentGitHubCopilotCLI),
+	model.AgentGitHubCopilotCLI: nativeCompatibility(model.AgentGitHubCopilotCLI, "copilot-cli"),
 }
 
 func nativeCompatibility(id model.AgentID, target string) codeGraphCompatibility {
