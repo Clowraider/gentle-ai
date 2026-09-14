@@ -173,6 +173,11 @@ func CheckHistory(events []HistoryEvent) ([]HistoryEvent, error) {
 	states, order := 0, make([]HistoryEvent, 0, len(events))
 	var search func(uint16, map[string]historyModel) bool
 	search = func(used uint16, models map[string]historyModel) bool {
+		key := canonicalSearchKey(used, models)
+		if visited[key] {
+			return false
+		}
+		visited[key] = true
 		states++
 		if states > MaxOracleSearchStates {
 			return false
@@ -180,11 +185,6 @@ func CheckHistory(events []HistoryEvent) ([]HistoryEvent, error) {
 		if len(order) == len(events) {
 			return true
 		}
-		key := canonicalSearchKey(used, models)
-		if visited[key] {
-			return false
-		}
-		visited[key] = true
 		for index, event := range events {
 			bit := uint16(1 << index)
 			if used&bit != 0 || predecessors[index]&^used != 0 {
