@@ -2461,15 +2461,23 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 		case deleteIdx:
 			home := homeDir()
 			registryPath := customAgentsRegistryPath()
+			var uninstallErr error
 			for name, selected := range m.CustomAgentDeleteSelected {
 				if selected {
 					if _, err := agentbuilder.Uninstall(registryPath, name, home); err != nil {
-						m.CustomAgentsErr = err
+						uninstallErr = errors.Join(uninstallErr, err)
 					}
 				}
 			}
 			m.CustomAgentDeleteSelected = nil
 			m.setScreen(ScreenCustomAgents)
+			if uninstallErr != nil {
+				if m.CustomAgentsErr != nil {
+					m.CustomAgentsErr = errors.Join(uninstallErr, m.CustomAgentsErr)
+				} else {
+					m.CustomAgentsErr = uninstallErr
+				}
+			}
 		case cancelIdx:
 			m.setScreen(ScreenCustomAgents)
 			m.CustomAgentDeleteSelected = nil

@@ -1,6 +1,7 @@
 package agentbuilder
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -266,6 +267,12 @@ func TestUninstall_ErrorScenarios(t *testing.T) {
 			if loadRegistryForTest(t, regPath).FindByName(name) == nil {
 				t.Fatal("expected registry entry unmutated when validation or removal fails")
 			}
+			if tt.blockFile {
+				skillDir := filepath.Join(supportedSkillsDirs(home)[model.AgentOpenCode], name, "SKILL.md")
+				if _, err := os.Stat(filepath.Join(skillDir, "nested")); err != nil {
+					t.Fatalf("expected directory payload untouched, got %v", err)
+				}
+			}
 			if tt.stubSave {
 				for _, f := range ownedFiles {
 					if _, err := os.Stat(f); err != nil {
@@ -416,5 +423,74 @@ func writeSkillFile(t *testing.T, path, body string) {
 	}
 	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
 		t.Fatalf("WriteFile %s: %v", path, err)
+	}
+}
+
+func TestUninstall_AgentNotFound(t *testing.T) {
+	home := t.TempDir()
+	regPath := writeRegistryForUninstall(t, home)
+	_, err := Uninstall(regPath, "non-existent-agent", home)
+	if err == nil {
+		t.Fatal("expected error for non-existent agent, got nil")
+	}
+	if !errors.Is(err, ErrAgentNotFound) {
+		t.Fatalf("expected ErrAgentNotFound, got %v", err)
+	}
+}
+
+func TestUninstall_CommitFailure_RestoresRegistryAndPropagatesError(t *testing.T) {
+	home := t.TempDir()
+	name := "commit-failure-agent"
+	agents := []model.AgentID{model.AgentClaudeCode, model.AgentOpenCode}
+	regPath := writeRegistryForUninstall(t, home, entry(name, agents...))
+	_ = createOwnedSkillFiles(t, home, name, agents)
+
+	claudeDir := filepath.Join(supportedSkillsDirs(home)[model.AgentClaudeCode], name)
+	openCodeDir := filepath.Join(supportedSkillsDirs(home)[model.AgentOpenCode], name)
+
+	orig := saveRegistry
+	t.Cleanup(func() { saveRegistry = orig })
+
+	saveCount := 0
+	saveRegistry = func(path string, reg *Registry) error {
+		saveCount++
+		if err := SaveRegistry(path, reg); err != nil {
+			return err
+		}
+		if saveCount == 1 {
+			openCodeTmp := filepath.Join(openCodeDir, "SKILL.md.uninstall-tmp")
+			if err := os.Remove(openCodeTmp); err != nil {
+				return err
+			}
+			if err := os.MkdirAll(filepath.Join(openCodeTmp, "nested"), 0755); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	result, err := Uninstall(regPath, name, home)
+	if err == nil {
+		t.Fatal("expected commit error, got nil")
+	}
+	if !strings.Contains(err.Error(), "uninstall: remove ") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+
+	if len(result.RemovedPaths) != 1 {
+		t.Fatalf("expected 1 removed path, got %v", result.RemovedPaths)
+	}
+	claudeSkill := filepath.Join(claudeDir, "SKILL.md")
+	if _, err := os.Stat(claudeSkill); !os.IsNotExist(err) {
+		t.Fatalf("expected claude skill removed, got %v", err)
+	}
+
+	reg := loadRegistryForTest(t, regPath)
+	restored := reg.FindByName(name)
+	if restored == nil {
+		t.Fatal("expected registry entry to be restored on commit failure")
+	}
+	if len(restored.InstalledAgents) != 1 || restored.InstalledAgents[0] != model.AgentOpenCode {
+		t.Fatalf("expected restored entry to have [OpenCode], got %v", restored.InstalledAgents)
 	}
 }

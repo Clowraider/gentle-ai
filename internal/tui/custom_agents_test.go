@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/agentbuilder"
+	"github.com/gentleman-programming/gentle-ai/v2/internal/agents/claude"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/model"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/system"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/tui/screens"
@@ -199,5 +200,48 @@ func TestCustomAgents_DeleteExecution(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); !os.IsNotExist(err) {
 		t.Fatalf("expected SKILL.md to be deleted, got err = %v", err)
+	}
+}
+
+func TestCustomAgents_DeleteExecution_PreservesError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeTestCustomAgentsRegistry(t, home,
+		agentbuilder.RegistryEntry{
+			Name:            "fail-agent",
+			Title:           "Fail Agent",
+			InstalledAgents: []model.AgentID{model.AgentClaudeCode},
+		},
+	)
+
+	// Make skills dir a file to force Uninstall failure
+	skillsDir := claude.NewAdapter().SkillsDir(home)
+	if err := os.MkdirAll(filepath.Dir(skillsDir), 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(skillsDir, []byte("blocker"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	m := NewModel(system.DetectionResult{}, "test-version")
+	m.setScreen(ScreenCustomAgents)
+
+	if len(m.CustomAgentsList) != 1 {
+		t.Fatalf("CustomAgentsList len = %d, want 1", len(m.CustomAgentsList))
+	}
+
+	m.Screen = ScreenCustomAgentDelete
+	m.CustomAgentDeleteSelected = map[string]bool{"fail-agent": true}
+	m.Cursor = 1 // "Delete Selected"
+
+	res, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	state := res.(Model)
+
+	if state.Screen != ScreenCustomAgents {
+		t.Fatalf("screen = %v, want ScreenCustomAgents", state.Screen)
+	}
+	if state.CustomAgentsErr == nil {
+		t.Fatal("expected non-nil CustomAgentsErr on uninstall failure, got nil")
 	}
 }
