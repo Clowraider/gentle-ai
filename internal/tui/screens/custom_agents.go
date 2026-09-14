@@ -77,31 +77,49 @@ func CustomAgentsOptionCount(agents []agentbuilder.RegistryEntry) int {
 	return len(agents) + 2
 }
 
-// RenderCustomAgentDelete renders the deletion confirmation screen for a custom agent.
-func RenderCustomAgentDelete(agentName string, cursor int) string {
+// RenderCustomAgentDelete renders the deletion screen with checkboxes for installed custom agents.
+func RenderCustomAgentDelete(agents []agentbuilder.RegistryEntry, selected map[string]bool, cursor int) string {
 	var b strings.Builder
 
-	b.WriteString(styles.TitleStyle.Render("Delete Custom Agent"))
+	b.WriteString(styles.TitleStyle.Render("Delete Custom Agents"))
+	b.WriteString("\n\n")
+	b.WriteString(styles.SubtextStyle.Render("Select custom agents to delete. Use space to toggle, enter on 'Delete Selected' to confirm."))
 	b.WriteString("\n\n")
 
-	safeName := sanitizeLabel(agentName)
-	b.WriteString(styles.WarningStyle.Render(fmt.Sprintf("Are you sure you want to delete custom agent %q?", safeName)))
-	b.WriteString("\n\n")
+	if len(agents) == 0 {
+		b.WriteString(styles.SubtextStyle.Render("No custom agents installed."))
+		b.WriteString("\n\n")
+		b.WriteString(renderOptions([]string{"Back"}, cursor))
+		b.WriteString("\n")
+		b.WriteString(styles.HelpStyle.Render("enter/esc: back"))
+		return styles.FrameStyle.Render(b.String())
+	}
 
-	b.WriteString(styles.SubtextStyle.Render("This will remove the agent from the registry and delete its SKILL.md from all supported installed agent skill directories."))
-	b.WriteString("\n\n")
+	for idx, a := range agents {
+		name := sanitizeLabel(a.Name)
+		title := sanitizeLabel(a.Title)
+		label := name
+		if title != "" {
+			label = fmt.Sprintf("%s ─── %s", name, title)
+		}
+		checked := selected != nil && selected[a.Name]
+		focused := idx == cursor
+		b.WriteString(renderCheckbox(label, checked, focused))
+	}
 
-	b.WriteString(styles.WarningStyle.Render("This action cannot be undone."))
-	b.WriteString("\n\n")
-
-	b.WriteString(renderOptions([]string{"Delete Agent", "Cancel"}, cursor))
 	b.WriteString("\n")
-	b.WriteString(styles.HelpStyle.Render("j/k: navigate • enter: confirm • esc: back"))
+	actions := []string{"Delete Selected", "Cancel"}
+	b.WriteString(renderOptions(actions, cursor-len(agents)))
+	b.WriteString("\n")
+	b.WriteString(styles.HelpStyle.Render("space: toggle • enter: confirm/cancel • esc: back"))
 
 	return styles.FrameStyle.Render(b.String())
 }
 
-// CustomAgentDeleteOptionCount returns the number of options on confirmation screen (2).
-func CustomAgentDeleteOptionCount() int {
-	return 2
+// CustomAgentDeleteOptionCount returns the number of options on the deletion screen.
+func CustomAgentDeleteOptionCount(agents []agentbuilder.RegistryEntry) int {
+	if len(agents) == 0 {
+		return 1
+	}
+	return len(agents) + 2
 }

@@ -39,15 +39,29 @@ func TestRenderCustomAgents_EmptyAndPopulated(t *testing.T) {
 }
 
 func TestRenderCustomAgentDelete(t *testing.T) {
-	out := RenderCustomAgentDelete("my-custom-agent", 0)
-	if !strings.Contains(out, "Delete Custom Agent") || !strings.Contains(out, "my-custom-agent") {
+	agents := []agentbuilder.RegistryEntry{
+		{Name: "my-custom-agent", Title: "Custom Agent"},
+		{Name: "other-agent", Title: "Other"},
+	}
+	selected := map[string]bool{"my-custom-agent": true}
+
+	out := RenderCustomAgentDelete(agents, selected, 0)
+	if !strings.Contains(out, "Delete Custom Agents") || !strings.Contains(out, "my-custom-agent") {
 		t.Errorf("expected title and agent name, got: %s", out)
 	}
-	if !strings.Contains(out, "supported installed agent skill directories") {
-		t.Errorf("expected accurate deletion scope description, got: %s", out)
+	if !strings.Contains(out, "[x]") || !strings.Contains(out, "[ ]") {
+		t.Errorf("expected checked and unchecked checkboxes, got: %s", out)
 	}
-	if count := CustomAgentDeleteOptionCount(); count != 2 {
-		t.Errorf("CustomAgentDeleteOptionCount = %d, want 2", count)
+	if count := CustomAgentDeleteOptionCount(agents); count != 4 {
+		t.Errorf("CustomAgentDeleteOptionCount = %d, want 4", count)
+	}
+
+	outEmpty := RenderCustomAgentDelete(nil, nil, 0)
+	if !strings.Contains(outEmpty, "No custom agents installed.") {
+		t.Errorf("expected empty message, got: %s", outEmpty)
+	}
+	if count := CustomAgentDeleteOptionCount(nil); count != 1 {
+		t.Errorf("CustomAgentDeleteOptionCount(nil) = %d, want 1", count)
 	}
 }
 
@@ -66,8 +80,8 @@ func TestRenderCustomAgents_SanitizesControlCharacters(t *testing.T) {
 		t.Errorf("expected sanitized label in output, got: %s", out)
 	}
 
-	deleteOut := RenderCustomAgentDelete("agent\nname\x1b[31m", 0)
-	if strings.Contains(deleteOut, "\nname") || strings.Contains(deleteOut, "\x1b[31m") {
+	deleteOut := RenderCustomAgentDelete(agents, nil, 0)
+	if strings.Contains(deleteOut, "\nwith-newline") || strings.Contains(deleteOut, "\x1b[31m") {
 		t.Errorf("expected delete screen to sanitize agent name, got: %q", deleteOut)
 	}
 }

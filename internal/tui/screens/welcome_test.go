@@ -144,7 +144,7 @@ func TestWelcomeOptions_ProfilesInsertedBeforeManageBackups(t *testing.T) {
 	}
 
 	if pluginsIdx != agentIdx+1 {
-		t.Errorf("plugins option at index %d, expected %d (right after 'Create your own Agent' at %d)",
+		t.Errorf("plugins option at index %d, expected %d (right after 'Manage Custom Agents' at %d)",
 			pluginsIdx, agentIdx+1, agentIdx)
 	}
 	if uninstallIdx != pluginsIdx+1 {
