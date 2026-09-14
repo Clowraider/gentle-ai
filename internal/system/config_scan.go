@@ -63,10 +63,7 @@ func isCopilotExtensionDir(name string) bool {
 
 // hasVSCodeCopilotExtension checks for github.copilot extension under .vscode/extensions.
 func hasVSCodeCopilotExtension(homeDir string) (bool, bool) {
-	entries, err := os.ReadDir(filepath.Join(homeDir, ".vscode", "extensions"))
-	if err != nil {
-		return false, false
-	}
+	entries, _ := os.ReadDir(filepath.Join(homeDir, ".vscode", "extensions"))
 	for _, entry := range entries {
 		if entry.IsDir() && isCopilotExtensionDir(entry.Name()) {
 			return true, true

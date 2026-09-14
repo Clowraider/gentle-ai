@@ -51,11 +51,11 @@ func (a *Adapter) Detect(_ context.Context, homeDir string) (bool, string, strin
 }
 
 func (a *Adapter) InstallCommand(profile system.PlatformProfile) ([][]string, error) {
-	const pkg = "@github/copilot@latest"
+	cmd := []string{"npm", "install", "-g", "@github/copilot@latest"}
 	if profile.OS == "linux" && !profile.NpmWritable {
-		return [][]string{{"sudo", "npm", "install", "-g", pkg}}, nil
+		cmd = append([]string{"sudo"}, cmd...)
 	}
-	return [][]string{{"npm", "install", "-g", pkg}}, nil
+	return [][]string{cmd}, nil
 }
 
 func (a *Adapter) GlobalConfigDir(homeDir string) string { return copilotconfig.Root(homeDir) }
@@ -89,8 +89,5 @@ func (a *Adapter) SupportsMCP() bool              { return a.CapabilityManifest(
 
 func defaultStat(path string) statResult {
 	info, err := os.Stat(path)
-	if err != nil {
-		return statResult{err: err}
-	}
-	return statResult{isDir: info.IsDir()}
+	return statResult{isDir: err == nil && info.IsDir(), err: err}
 }

@@ -176,23 +176,15 @@ func TestScanConfigs_IsDirectorySetForExistingDirs(t *testing.T) {
 func TestScanConfigs_CopilotCLIAndVSCodeDoNotCollide(t *testing.T) {
 	t.Setenv("COPILOT_HOME", "")
 	home := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(home, ".copilot"), 0o755); err != nil {
-		t.Fatalf("MkdirAll(.copilot): %v", err)
-	}
-	for _, ext := range []string{"ms-python.python", "github.copilot-chat-0.12.0"} {
-		if err := os.MkdirAll(filepath.Join(home, ".vscode", "extensions", ext), 0o755); err != nil {
-			t.Fatalf("MkdirAll(%s): %v", ext, err)
-		}
-	}
+	mustMkdir(t, filepath.Join(home, ".copilot"))
+	mustMkdir(t, filepath.Join(home, ".vscode", "extensions", "github.copilot-chat-0.12.0"))
 
 	configs := ScanConfigs(home)
 	if !configStateFor(t, configs, "github-copilot-cli").Exists || configStateFor(t, configs, "vscode-copilot").Exists {
 		t.Errorf("github-copilot-cli must exist and vscode-copilot must not exist for copilot-chat")
 	}
 
-	if err := os.MkdirAll(filepath.Join(home, ".vscode", "extensions", "github.copilot-1.2.3"), 0o755); err != nil {
-		t.Fatalf("MkdirAll(github.copilot-1.2.3): %v", err)
-	}
+	mustMkdir(t, filepath.Join(home, ".vscode", "extensions", "github.copilot-1.2.3"))
 	if !configStateFor(t, ScanConfigs(home), "vscode-copilot").Exists {
 		t.Errorf("vscode-copilot Exists = false, want true for github.copilot-1.2.3")
 	}
@@ -201,13 +193,18 @@ func TestScanConfigs_CopilotCLIAndVSCodeDoNotCollide(t *testing.T) {
 func TestScanConfigs_UsesCopilotHome(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "custom-copilot")
 	t.Setenv("COPILOT_HOME", root)
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatalf("MkdirAll(COPILOT_HOME): %v", err)
-	}
+	mustMkdir(t, root)
 
 	config := configStateFor(t, ScanConfigs(t.TempDir()), "github-copilot-cli")
 	if config.Path != root || !config.Exists || !config.IsDirectory {
 		t.Fatalf("github-copilot-cli = %+v, want path %q present directory", config, root)
+	}
+}
+
+func mustMkdir(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
 	}
 }
 
