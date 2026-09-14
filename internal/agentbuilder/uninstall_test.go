@@ -1,6 +1,7 @@
 package agentbuilder
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -416,5 +417,17 @@ func writeSkillFile(t *testing.T, path, body string) {
 	}
 	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
 		t.Fatalf("WriteFile %s: %v", path, err)
+	}
+}
+
+func TestUninstall_AgentNotFound(t *testing.T) {
+	home := t.TempDir()
+	regPath := writeRegistryForUninstall(t, home)
+	_, err := Uninstall(regPath, "non-existent-agent", home)
+	if err == nil {
+		t.Fatal("expected error for non-existent agent, got nil")
+	}
+	if !errors.Is(err, ErrAgentNotFound) {
+		t.Fatalf("expected ErrAgentNotFound, got %v", err)
 	}
 }
