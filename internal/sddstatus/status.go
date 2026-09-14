@@ -98,6 +98,13 @@ type TaskProgress struct {
 type blockerReasons struct {
 	expectedPlanning []string
 	genuine          []string
+	// notes carries informational diagnostics that must never gate a phase. It
+	// is deliberately a separate channel: the public `blockedReasons` is a gate
+	// (every consumer contract forbids apply, archive, and terminal work on a
+	// non-empty value), so routing a note that says "this does not block the
+	// current work unit" through it made the producer contradict itself
+	// (#4372). Notes are route-independent and never pass through finalize.
+	notes []string
 }
 
 func (reasons blockerReasons) forRoute(nextRecommended string) []string {
@@ -190,6 +197,15 @@ type Status struct {
 	PhaseInstructions *PhaseInstructions  `json:"phaseInstructions,omitempty"`
 	NextRecommended   string              `json:"nextRecommended"`
 	BlockedReasons    []string            `json:"blockedReasons"`
+	// Notes carries non-blocking diagnostics for a consumer to report, never to
+	// gate on: a non-empty Notes never withholds apply, sync, archive, or a
+	// terminal route. Always serialized as an array — `[]` when there is nothing
+	// to report — so a consumer never special-cases a missing or null field.
+	Notes []string `json:"notes"`
+	// consentPreparationRoots carries resolver facts for the existing explicit
+	// continuation command. It is deliberately internal: status reports why
+	// preparation is needed but never gains authority to perform it.
+	consentPreparationRoots []string
 	// runtimeAttemptTokens carries the ledger's live attempt tokens alongside
 	// RuntimeStatus so status can ask the one readiness predicate the same
 	// question compact acquire asks, and name the same continuation acquire
@@ -537,7 +553,8 @@ func resolveReviewDisabled(options ResolveOptions, workspaceRoot string) (bool, 
 	if options.ReviewDisabledForWorkspace == nil {
 		return options.ReviewDisabled, nil
 	}
-	return options.ReviewDisabledForWorkspace(workspaceRoot)
+	disabled, err := options.ReviewDisabledForWorkspace(workspaceRoot)
+	return disabled || err != nil, nil
 }
 
 func resolveByPreferenceOrder(options ResolveOptions) (Status, error) {
@@ -545,13 +562,7 @@ func resolveByPreferenceOrder(options ResolveOptions) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	reviewDisabled := options.ReviewDisabled
-	if options.ReviewDisabledForWorkspace != nil {
-		reviewDisabled, err = options.ReviewDisabledForWorkspace(workspaceRoot)
-		if err != nil {
-			return Status{}, err
-		}
-	}
+	reviewDisabled, _ := resolveReviewDisabled(options, workspaceRoot)
 	planningHome := filepath.Join(workspaceRoot, "openspec")
 	changesDir := filepath.Join(planningHome, "changes")
 	activeChanges, err := listActiveOpenSpecChanges(workspaceRoot)
@@ -654,22 +665,19 @@ func resolveByPreferenceOrder(options ResolveOptions) (Status, error) {
 	applyState, unauthorizedRoots := applyEditAuthorityBlock(applyState, &blockedReasons, readText(firstPath(artifactPaths.Tasks)), workspaceRoot, append([]string{workspaceRoot}, grantedRoots...))
 	var consent *SDDIntegrationConsentResult
 	if len(unauthorizedRoots) != 0 {
-		// The envelope must name an invocation the agent executes verbatim,
-		// so the instance token is minted (once) and persisted here; a
-		// covering grant later projects through the same token and detection
-		// finds nothing, so no envelope and no mint happen on ordinary
-		// statuses.
 		if instance == "" {
-			if instance, err = ensureChangeInstanceMarker(changeRoot); err != nil {
-				return Status{}, err
+			blockedReasons.genuine = append(blockedReasons.genuine, fmt.Sprintf(
+				"Run `gentle-ai sdd-continue %s --cwd %s` with authorized change-directory writes to prepare the required marker; this grants no edit roots.",
+				pathquote.Quote(changeName), pathquote.Quote(workspaceRoot),
+			))
+		} else {
+			expectedRevision := ""
+			if runtimeStatus != nil {
+				expectedRevision = runtimeStatus.Revision
 			}
+			envelope := newEditAuthorityConsent(changeName, workspaceRoot, unauthorizedRoots, instance, expectedRevision)
+			consent = &envelope
 		}
-		expectedRevision := ""
-		if runtimeStatus != nil {
-			expectedRevision = runtimeStatus.Revision
-		}
-		envelope := newEditAuthorityConsent(changeName, workspaceRoot, unauthorizedRoots, instance, expectedRevision)
-		consent = &envelope
 	}
 	runtimeRemediationComplete := nativeRuntimeCompletesRemediation(runtimeStatus, runtimeAttemptTokens, verifyResult)
 	// Stale or incomplete evidence always re-enters independent SDD verification.
@@ -705,6 +713,7 @@ func resolveByPreferenceOrder(options ResolveOptions) (Status, error) {
 	status.ApplyState = applyState
 	status.RemediationState = remediationState
 	status.RuntimeStatus = runtimeStatus
+	status.consentPreparationRoots = append([]string{}, unauthorizedRoots...)
 	status.runtimeAttemptTokens = runtimeAttemptTokens
 	// Historical verification remains visible in verify instructions, but cannot
 	// block unfinished implementation before final verification is applicable.
@@ -716,6 +725,7 @@ func resolveByPreferenceOrder(options ResolveOptions) (Status, error) {
 	}
 	applyReviewOfferRouting(context.Background(), &status, workspaceRoot, reviewDisabled)
 	status.BlockedReasons = blockedReasons.finalize(status.NextRecommended, status.BlockedReasons)
+	status.Notes = append(status.Notes, blockedReasons.notes...)
 	if runtimeRemediationComplete && status.Dependencies.Verify == DependencyReady && status.Dependencies.Archive == DependencyBlocked && status.NextRecommended == string(PhaseVerify) {
 		status.verifyRefreshReason = runtimeRemediationVerifyRefreshInstruction
 	}
@@ -1012,9 +1022,11 @@ func resolveEngramStatus(workspaceRoot string, requestedChange string, includeIn
 		status.NextRecommended = "archived"
 		status.Archived = &ArchivedProjection{Path: fmt.Sprintf("sdd/%s/archive-report", changeName)}
 		status.BlockedReasons = []string{}
+		status.Notes = []string{}
 		status.RemediationState = RemediationState{}
 	} else {
 		status.BlockedReasons = blockedReasons.finalize(status.NextRecommended, status.BlockedReasons)
+		status.Notes = append(status.Notes, blockedReasons.notes...)
 	}
 	if runtimeRemediationComplete && status.Dependencies.Verify == DependencyReady && status.Dependencies.Archive == DependencyBlocked && status.NextRecommended == string(PhaseVerify) {
 		status.verifyRefreshReason = runtimeRemediationVerifyRefreshInstruction
@@ -1322,6 +1334,12 @@ func RenderMarkdown(status Status) string {
 			lines = append(lines, fmt.Sprintf("- %s", reason))
 		}
 	}
+	if len(status.Notes) > 0 {
+		lines = append(lines, "", "### Notes", "Informational only. These do not block the route reported above.")
+		for _, note := range status.Notes {
+			lines = append(lines, fmt.Sprintf("- %s", note))
+		}
+	}
 	lines = append(lines, "", "### JSON", "```json", string(jsonBytes), "```")
 	return strings.Join(lines, "\n")
 }
@@ -1359,6 +1377,12 @@ func RenderDispatcherMarkdown(status Status) string {
 		lines = append(lines, "", "### Blocked Reasons")
 		for _, reason := range status.BlockedReasons {
 			lines = append(lines, fmt.Sprintf("- %s", reason))
+		}
+	}
+	if len(status.Notes) > 0 {
+		lines = append(lines, "", "### Notes", "Informational only. These do not block the route reported above.")
+		for _, note := range status.Notes {
+			lines = append(lines, fmt.Sprintf("- %s", note))
 		}
 	}
 	if extra, ok := nonPhaseRoutingInstructions(status); ok {
@@ -1544,6 +1568,7 @@ func baseStatus(store ArtifactStore, workspaceRoot string, grantedRoots []string
 		},
 		NextRecommended: next,
 		BlockedReasons:  reasons,
+		Notes:           []string{},
 	}
 }
 

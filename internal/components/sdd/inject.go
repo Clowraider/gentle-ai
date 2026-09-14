@@ -1804,11 +1804,15 @@ func installSkillRegistryAutomation(homeDir string, adapter agents.Adapter) (Inj
 	if err != nil {
 		return InjectionResult{}, fmt.Errorf("install Claude review stop-hook: %w", err)
 	}
+	preflightHookChanged, err := ensureClaudeSDDPreflightHook(settingsPath, adapter.Agent())
+	if err != nil {
+		return InjectionResult{}, fmt.Errorf("install Claude SDD preflight hook: %w", err)
+	}
 	telemetryHookChanged, err := ensureClaudeTelemetryHooks(settingsPath)
 	if err != nil {
 		return InjectionResult{}, fmt.Errorf("install Claude runtime telemetry hooks: %w", err)
 	}
-	return InjectionResult{Changed: changed || stopHookChanged || telemetryHookChanged, Files: []string{settingsPath}}, nil
+	return InjectionResult{Changed: changed || stopHookChanged || preflightHookChanged || telemetryHookChanged, Files: []string{settingsPath}}, nil
 }
 
 func ensureCodexSkillRegistryHook(hooksPath string) (bool, error) {
@@ -1951,6 +1955,61 @@ func ensureClaudeSkillRegistryHook(settingsPath string) (bool, error) {
 	hooksMap["UserPromptSubmit"] = userPromptSubmit
 	root["hooks"] = hooksMap
 
+	out, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return false, err
+	}
+	out = append(out, '\n')
+	wr, err := filemerge.WriteFileAtomic(settingsPath, out, 0o644)
+	if err != nil {
+		return false, err
+	}
+	return wr.Changed, nil
+}
+
+// ensureClaudeSDDPreflightHook binds one successful parent AskUserQuestion
+// preflight to later SDD Agent launches in the same Claude session.
+func ensureClaudeSDDPreflightHook(settingsPath string, agentID model.AgentID) (bool, error) {
+	root := map[string]any{}
+	if data, err := os.ReadFile(settingsPath); err == nil && len(strings.TrimSpace(string(data))) > 0 {
+		if err := json.Unmarshal(data, &root); err != nil {
+			return false, fmt.Errorf("parse Claude settings %q: %w", settingsPath, err)
+		}
+	} else if err != nil && !os.IsNotExist(err) {
+		return false, err
+	}
+
+	hooksRaw, hasHooks := root["hooks"]
+	hooksMap, _ := hooksRaw.(map[string]any)
+	if hasHooks && hooksMap == nil {
+		return false, fmt.Errorf("Claude settings %q has unsupported hooks shape: want object", settingsPath)
+	}
+	if hooksMap == nil {
+		hooksMap = map[string]any{}
+	}
+
+	command := fmt.Sprintf("gentle-ai sdd-preflight-hook --agent %s", agentID)
+	changed := false
+	// Claude Code hook commands are callable by model-started processes and do
+	// not carry authenticated caller provenance. Install only the fail-closed
+	// dispatch guard; never install a hook that claims to mint authority.
+	for _, hook := range []struct{ key, matcher string }{
+		{key: "PreToolUse", matcher: "Agent"},
+	} {
+		added, err := appendClaudeReviewStopHookEntry(hooksMap, hook.key, settingsPath, command, map[string]any{
+			"matcher": hook.matcher,
+			"hooks":   []any{map[string]any{"type": "command", "command": command, "timeout": 30}},
+		})
+		if err != nil {
+			return false, err
+		}
+		changed = changed || added
+	}
+	if !changed {
+		return false, nil
+	}
+
+	root["hooks"] = hooksMap
 	out, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
 		return false, err
@@ -2924,64 +2983,74 @@ func stripBareOrchestratorForFilePrompt(content string) string {
 	return result
 }
 
-// legacyPiSystemPromptSectionIDs lists every gentle-ai:-marked section that a
-// Pi install made before the capability manifest started reporting
-// SupportsSystemPrompt()==false for Pi (see 965187e6) could have left behind
-// in the Pi adapter's SystemPromptFile. Nothing manages this file anymore, so
-// none of these blocks self-heal on install/sync/uninstall. The
-// "codegraph-guidance" entry mirrors communitytool.codeGraphGuidanceSectionID,
-// which is unexported; agentguidance.RoutingSectionID covers the routing
-// guidance block a defect once wrote here instead of skipping Pi (#4063).
+// legacyPiSystemPromptSectionIDs are the only marker pairs this cleanup owns.
+// Pi's package owns APPEND_SYSTEM.md, so unmarked and non-allowlisted content
+// must never be interpreted as Gentle AI content.
 var legacyPiSystemPromptSectionIDs = []string{
-	"sdd-orchestrator",
-	"strict-tdd-mode",
-	"persona",
-	"codegraph-guidance",
-	agentguidance.RoutingSectionID,
+	"persona", "engram-protocol", "sdd-orchestrator", "strict-tdd-mode",
+	"agent-routing", "trigger-rules", "codegraph-guidance",
 }
 
-// RetirePiSystemPromptBlocks removes any gentle-ai managed markdown sections
-// (and a bare legacy SDD orchestrator block) that an older gentle-ai build
-// wrote into the Pi adapter's SystemPromptFile. gentle-pi owns the Pi system
-// prompt, so this file should carry no gentle-ai content going forward.
-//
-// It is safe to call unconditionally: a missing file is a no-op, and repeated
-// calls are idempotent. Content outside the managed markers is preserved
-// byte-for-byte. If nothing but whitespace remains after stripping, the file
-// is rewritten with that whitespace-only remainder rather than deleted: a
-// whitespace-only file is harmless (Pi appends nothing), the rewrite is
-// recoverable and consistent with every other managed-section rewrite, and
-// only the uninstall call site registers a backup target for this file.
-//
-// Only ever call this with the Pi adapter. Unlike the SupportsSystemPrompt()
-// gated helpers elsewhere in this package, it strips these sections
-// unconditionally regardless of what the adapter reports.
+// RetirePiSystemPromptBlocks removes only complete legacy managed sections from
+// Pi's APPEND_SYSTEM.md. It refuses a direct file symlink but permits symlinked
+// parent directories, preserving regular-file mode and every unowned byte.
 func RetirePiSystemPromptBlocks(homeDir string, adapter agents.Adapter) (InjectionResult, error) {
 	promptPath := adapter.SystemPromptFile(homeDir)
-
-	existing, err := readFileOrEmpty(promptPath)
-	if err != nil {
-		return InjectionResult{}, err
-	}
-
-	updated := existing
-	if hasLegacyBareOrchestrator(updated) {
-		updated = stripBareOrchestratorForFilePrompt(updated)
-	}
-	for _, sectionID := range legacyPiSystemPromptSectionIDs {
-		updated = filemerge.InjectMarkdownSection(updated, sectionID, "")
-	}
-
-	if updated == existing {
+	info, err := os.Lstat(promptPath)
+	if os.IsNotExist(err) {
 		return InjectionResult{}, nil
 	}
+	if err != nil {
+		return InjectionResult{}, fmt.Errorf("stat Pi system prompt %q: %w", promptPath, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return InjectionResult{}, fmt.Errorf("Pi system prompt %q is not a regular file", promptPath)
+	}
 
-	writeResult, err := filemerge.WriteFileAtomic(promptPath, []byte(updated), 0o644)
+	existing, err := os.ReadFile(promptPath)
+	if err != nil {
+		return InjectionResult{}, fmt.Errorf("read Pi system prompt %q: %w", promptPath, err)
+	}
+	updated, removed := removePiManagedSections(string(existing))
+	if !removed {
+		return InjectionResult{}, nil
+	}
+	if strings.TrimSpace(updated) == "" {
+		if err := os.Remove(promptPath); err != nil {
+			return InjectionResult{}, fmt.Errorf("remove empty Pi system prompt %q: %w", promptPath, err)
+		}
+		return InjectionResult{Changed: true, Files: []string{promptPath}}, nil
+	}
+	writeResult, err := filemerge.WriteFileAtomic(promptPath, []byte(updated), info.Mode().Perm())
 	if err != nil {
 		return InjectionResult{}, err
 	}
-
 	return InjectionResult{Changed: writeResult.Changed, Files: []string{promptPath}}, nil
+}
+
+func removePiManagedSections(content string) (string, bool) {
+	removed := false
+	for _, sectionID := range legacyPiSystemPromptSectionIDs {
+		open := "<!-- gentle-ai:" + sectionID + " -->"
+		close := "<!-- /gentle-ai:" + sectionID + " -->"
+		for search := 0; ; {
+			start := strings.Index(content[search:], open)
+			if start < 0 {
+				break
+			}
+			start += search
+			end := strings.Index(content[start+len(open):], close)
+			if end < 0 {
+				search = start + len(open)
+				continue
+			}
+			end += start + len(open) + len(close)
+			content = content[:start] + content[end:]
+			removed = true
+			search = start
+		}
+	}
+	return content, removed
 }
 
 const instructionsFrontmatter = "---\n" +

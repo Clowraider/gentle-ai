@@ -505,8 +505,18 @@ func TestKilocodeReviewSettingsMatchCurrentMainBaseline(t *testing.T) {
 	// Kilocode inherits that metadata, not additional native RDD support.
 	// #4324 appends canonical remote authorization to managed executor prompts;
 	// native permissions and the primary orchestrator remain unchanged.
+	// Task 1.5 separates read-only status from authorized continuation. Same-home
+	// materialization changes only the shared dispatcher guard in the orchestrator prompt.
+	// #4524 makes the shared session preflight explicit about runtime-confirmed parent
+	// authority. Kilocode inherits the prompt-only fallback because it has no managed
+	// executable tool interception surface.
+	// The OpenCode preflight now always routes through the `question` tool instead of
+	// falling back to a lossless blocking prompt when all three groups are
+	// representable, so the runtime-owned plugin can canonicalize and tolerantly match
+	// grouped answers instead of losing them to a typed chat reply. Kilocode embeds the
+	// same shared session preflight body, so the hash moved. Deliberate, not drift.
 	// #4219 clarifies same-ID compact settle recovery in managed orchestrator assets.
-	const want = "a4c8eb20e8aefe78f740a657e608cf050adcebb8d98ff6a116932d8545487cd9"
+	const want = "64c81b36b08b97a8abf2f0929f4770fa5a1620d2e1fbd46495e191c4d44ed4af"
 	if got != want {
 		t.Fatalf("Kilocode settings SHA-256 = %s, want current-main baseline %s", got, want)
 	}
