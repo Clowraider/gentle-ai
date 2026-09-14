@@ -33,6 +33,7 @@ const (
 )
 
 type stagedItem struct {
+	agentID   model.AgentID
 	parent    *os.Root
 	sub       *os.Root
 	kind      stagedKind
@@ -58,17 +59,19 @@ func rollbackStaged(items []stagedItem) {
 	}
 }
 
-func commitStaged(items []stagedItem) []string {
+func commitStaged(items []stagedItem) ([]string, int, error) {
 	var removed []string
-	for _, it := range items {
+	for i, it := range items {
 		if it.kind == stagedSymlink {
-			if err := it.parent.Remove(it.tmp); err == nil {
-				removed = append(removed, it.finalPath)
+			if err := it.parent.Remove(it.tmp); err != nil {
+				return removed, i, fmt.Errorf("remove %s: %w", it.finalPath, err)
 			}
+			removed = append(removed, it.finalPath)
 		} else if it.kind == stagedFile {
-			if err := it.sub.Remove(it.tmp); err == nil {
-				removed = append(removed, it.finalPath)
+			if err := it.sub.Remove(it.tmp); err != nil {
+				return removed, i, fmt.Errorf("remove %s: %w", it.finalPath, err)
 			}
+			removed = append(removed, it.finalPath)
 			_ = it.sub.Close()
 			_ = it.parent.Remove(it.name)
 		}
@@ -76,7 +79,7 @@ func commitStaged(items []stagedItem) []string {
 			_ = it.parent.Close()
 		}
 	}
-	return removed
+	return removed, len(items), nil
 }
 
 func stageSkillRemoval(skillsDir, targetName string) (*stagedItem, error) {
@@ -175,10 +178,9 @@ func stageSkillRemoval(skillsDir, targetName string) (*stagedItem, error) {
 	}
 
 	if sfi.IsDir() {
-		err := subRoot.Remove("SKILL.md")
 		_ = subRoot.Close()
 		_ = parentRoot.Close()
-		return nil, fmt.Errorf("remove %s: %w", skillFile, err)
+		return nil, fmt.Errorf("remove %s: payload is a directory", skillFile)
 	}
 
 	tmpSkill := "SKILL.md.uninstall-tmp"
@@ -243,6 +245,7 @@ func Uninstall(registryPath, agentName, homeDir string) (UninstallResult, error)
 			return result, fmt.Errorf("uninstall: %w", err)
 		}
 		if item != nil {
+			item.agentID = agentID
 			staged = append(staged, *item)
 		}
 	}
@@ -256,7 +259,22 @@ func Uninstall(registryPath, agentName, homeDir string) (UninstallResult, error)
 		return result, fmt.Errorf("uninstall: save registry: %w", err)
 	}
 
-	result.RemovedPaths = commitStaged(staged)
+	removed, committed, commitErr := commitStaged(staged)
+	result.RemovedPaths = removed
+	if commitErr != nil {
+		rollbackStaged(staged[committed:])
+		var remaining []model.AgentID
+		for _, it := range staged[committed:] {
+			remaining = append(remaining, it.agentID)
+		}
+		remaining = append(remaining, result.SkippedAgents...)
+		entry.InstalledAgents = remaining
+		registry.Add(*entry)
+		if saveErr := saveRegistry(registryPath, registry); saveErr != nil {
+			return result, fmt.Errorf("uninstall: %w (restore registry: %v)", commitErr, saveErr)
+		}
+		return result, fmt.Errorf("uninstall: %w", commitErr)
+	}
 	return result, nil
 }
 
