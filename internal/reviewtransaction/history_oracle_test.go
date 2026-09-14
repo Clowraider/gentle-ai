@@ -2,6 +2,7 @@ package reviewtransaction
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -52,6 +53,48 @@ func TestCheckHistoryKeepsLineagesIndependent(t *testing.T) {
 	second.LineageID = "other-lineage"
 	if _, err := CheckHistory([]HistoryEvent{first, second}); err != nil {
 		t.Fatalf("CheckHistory() error = %v", err)
+	}
+}
+
+func TestCheckHistoryConvergingPathsDoNotExhaustSearchBound(t *testing.T) {
+	// event0 (start) and event1 (status on absent) both belong to "lineage-a".
+	// If event0 runs first, "lineage-a" transitions to HistoryReviewing, making event1 impossible.
+	// Therefore, any legal serialization must order event1 before event0.
+	// Events 2..7 are independent and commute with event0.
+	// When DFS explores event0 first, it traverses permutations of events 2..7 before backtracking.
+	// Without canonical memoization of search states, traversal paths exceed MaxOracleSearchStates (4096).
+	events := []HistoryEvent{
+		historyEvent("start", HistoryStart, 1, 10, HistoryAbsent, HistoryReviewing, HistoryEffectNone, HistoryEffectNone, "created", "", "r1"),
+	}
+	events[0].LineageID = "lineage-a"
+	for i := 1; i <= 6; i++ {
+		ev := historyEvent(fmt.Sprintf("v%d", i), HistoryValidate, 1, 10, HistoryAbsent, HistoryAbsent, HistoryEffectNone, HistoryEffectNone, "blocked", "", "")
+		ev.LineageID = fmt.Sprintf("lineage-%d", i)
+		events = append(events, ev)
+	}
+	status := historyEvent("status", HistoryStatus, 1, 10, HistoryAbsent, HistoryAbsent, HistoryEffectNone, HistoryEffectNone, "start", "", "")
+	status.LineageID = "lineage-a"
+	events = append(events, status)
+
+	ordered, err := CheckHistory(events)
+	if err != nil {
+		t.Fatalf("CheckHistory() error = %v, want successful serialization", err)
+	}
+	if len(ordered) != len(events) {
+		t.Fatalf("linearization len = %d, want %d", len(ordered), len(events))
+	}
+	// Verify event1 (status) was ordered before event0 (start)
+	statusIdx, startIdx := -1, -1
+	for i, ev := range ordered {
+		if ev.InvocationID == "status" {
+			statusIdx = i
+		}
+		if ev.InvocationID == "start" {
+			startIdx = i
+		}
+	}
+	if statusIdx > startIdx {
+		t.Fatalf("status at %d, start at %d; want status before start", statusIdx, startIdx)
 	}
 }
 
