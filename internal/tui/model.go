@@ -3108,7 +3108,7 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 			m.setScreen(ScreenAgentBuilderComplete)
 		}
 	case ScreenAgentBuilderComplete:
-		m.setScreen(ScreenCustomAgents)
+		m.setScreen(ScreenWelcome)
 	case ScreenUpdatePrompt:
 		// Cursor maps to: 0=Update now, 1=View changes, 2=Keep current version.
 		// Enter always confirms the currently highlighted option.
@@ -3971,10 +3971,10 @@ func (m Model) goBack(cmd *tea.Cmd) Model {
 	// Agent builder back navigation.
 	switch m.Screen {
 	case ScreenAgentBuilderComplete:
-		m.setScreen(ScreenCustomAgents)
+		m.setScreen(ScreenWelcome)
 		return m
 	case ScreenAgentBuilderEngine:
-		m.setScreen(ScreenCustomAgents)
+		m.setScreen(ScreenWelcome)
 		return m
 	case ScreenAgentBuilderInstalling:
 		// Can't go back while installing — guard above handles this.
