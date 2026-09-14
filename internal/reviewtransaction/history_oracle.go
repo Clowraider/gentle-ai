@@ -13,8 +13,8 @@ const (
 )
 
 var (
-	ErrOracleHistoryBound = errors.New("review history exceeds bounded oracle input")
-	ErrOracleSearchBound  = errors.New("review history oracle exhausted its search budget")
+	ErrOracleHistoryBound = errors.New("review history exceeds bounded oracle input")       // refusal:by-design operator-knowledge: the caller must provide a history with at most MaxOracleHistoryEvents events
+	ErrOracleSearchBound  = errors.New("review history oracle exhausted its search budget") // refusal:by-design operator-knowledge: the caller must provide a history that resolves within MaxOracleSearchStates states
 )
 
 type HistoryOperation string
@@ -158,7 +158,7 @@ func CheckHistory(events []HistoryEvent) ([]HistoryEvent, error) {
 	}
 	for _, event := range events {
 		if event.InvocationID == "" || event.LineageID == "" || event.Completed < event.Started {
-			return nil, fmt.Errorf("invalid history event %q", event.InvocationID)
+			return nil, fmt.Errorf("invalid history event %q", event.InvocationID) // refusal:by-design operator-knowledge: each event must supply non-empty IDs and an ordered time interval
 		}
 	}
 	predecessors := make([]uint16, len(events))
@@ -217,5 +217,5 @@ func CheckHistory(events []HistoryEvent) ([]HistoryEvent, error) {
 	if states > MaxOracleSearchStates {
 		return nil, ErrOracleSearchBound
 	}
-	return nil, errors.New("review history has no legal real-time-compatible serialization")
+	return nil, errors.New("review history has no legal real-time-compatible serialization") // refusal:by-design operator-knowledge: the event history violates legal state machine transitions or real-time precedence
 }
