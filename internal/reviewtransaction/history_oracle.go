@@ -79,6 +79,9 @@ func (model historyModel) step(event HistoryEvent) (historyModel, bool) {
 	next := model
 	switch event.Operation {
 	case HistoryStart:
+		if event.IdempotencyKey == "" {
+			return model, false
+		}
 		switch model.authority {
 		case HistoryAbsent:
 			if event.Result != "created" || event.AfterAuthority != HistoryReviewing || event.AfterEffect != model.effect || event.ObservedRevision == "" {
@@ -93,7 +96,7 @@ func (model historyModel) step(event HistoryEvent) (historyModel, bool) {
 			return model, false
 		}
 	case HistoryFinalize:
-		if model.authority == HistoryReviewing && event.ExpectedRevision == model.revision && event.Result == "approved" && event.AfterAuthority == HistoryApproved && event.AfterEffect == HistoryEffectPending && event.ObservedRevision != "" {
+		if model.authority == HistoryReviewing && event.ExpectedRevision == model.revision && event.Result == "approved" && event.AfterAuthority == HistoryApproved && event.AfterEffect == HistoryEffectPending && event.ObservedRevision != "" && event.ObservedRevision != model.revision {
 			next.authority, next.effect, next.revision = HistoryApproved, HistoryEffectPending, event.ObservedRevision
 		} else if model.authority == HistoryApproved && event.Result == "idempotent" && event.preserves(model) {
 			return model, true

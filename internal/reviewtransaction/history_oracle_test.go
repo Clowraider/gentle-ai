@@ -40,6 +40,20 @@ func TestCheckHistoryRejectsImpossibleOrOversizedHistories(t *testing.T) {
 			t.Fatal("CheckHistory() accepted an impossible real-time order")
 		}
 	})
+	t.Run("empty start idempotency key", func(t *testing.T) {
+		start := historyEvent("start", HistoryStart, 1, 2, HistoryAbsent, HistoryReviewing, HistoryEffectNone, HistoryEffectNone, "created", "", "r1")
+		start.IdempotencyKey = ""
+		if _, err := CheckHistory([]HistoryEvent{start}); err == nil {
+			t.Fatal("CheckHistory() accepted a START event with empty idempotency key")
+		}
+	})
+	t.Run("approval without revision advance", func(t *testing.T) {
+		start := historyEvent("start", HistoryStart, 1, 2, HistoryAbsent, HistoryReviewing, HistoryEffectNone, HistoryEffectNone, "created", "", "r1")
+		finalize := historyEvent("finalize", HistoryFinalize, 3, 4, HistoryReviewing, HistoryApproved, HistoryEffectNone, HistoryEffectPending, "approved", "r1", "r1")
+		if _, err := CheckHistory([]HistoryEvent{start, finalize}); err == nil {
+			t.Fatal("CheckHistory() accepted an approval without advancing authority revision")
+		}
+	})
 	t.Run("input bound", func(t *testing.T) {
 		if _, err := CheckHistory(make([]HistoryEvent, MaxOracleHistoryEvents+1)); !errors.Is(err, ErrOracleHistoryBound) {
 			t.Fatalf("CheckHistory() error = %v, want ErrOracleHistoryBound", err)
@@ -95,6 +109,15 @@ func TestCheckHistoryConvergingPathsDoNotExhaustSearchBound(t *testing.T) {
 	}
 	if statusIdx > startIdx {
 		t.Fatalf("status at %d, start at %d; want status before start", statusIdx, startIdx)
+	}
+}
+
+func TestCheckHistoryAcceptsIdempotentApprovalReplay(t *testing.T) {
+	start := historyEvent("start", HistoryStart, 1, 2, HistoryAbsent, HistoryReviewing, HistoryEffectNone, HistoryEffectNone, "created", "", "r1")
+	finalize := historyEvent("finalize", HistoryFinalize, 3, 4, HistoryReviewing, HistoryApproved, HistoryEffectNone, HistoryEffectPending, "approved", "r1", "r2")
+	replay := historyEvent("replay", HistoryFinalize, 5, 6, HistoryApproved, HistoryApproved, HistoryEffectPending, HistoryEffectPending, "idempotent", "r2", "r2")
+	if _, err := CheckHistory([]HistoryEvent{start, finalize, replay}); err != nil {
+		t.Fatalf("CheckHistory() error = %v, want idempotent approval replay accepted", err)
 	}
 }
 
